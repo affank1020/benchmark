@@ -98,18 +98,97 @@ function xmlAttributes(text: string): Record<string, string> {
   return result;
 }
 
+type JunitSuite = {
+  tests: number;
+  attributes: Record<string, string>;
+  cases: number;
+  failures: number;
+  errors: number;
+  skipped: number;
+};
+type JunitCase = { failure: boolean; error: boolean; skipped: boolean };
+
+// A suite's outcome attributes are optional in JUnit XML. Derive them from
+// testcase elements only when every declared test case is represented;
+// otherwise fail closed rather than turn an unknown failure into a pass.
+function suiteOutcomes(suite: JunitSuite): { failed: number; skipped: number } {
+  const { attributes, tests, cases, failures, errors, skipped } = suite;
+  if (cases > tests) throw new Error("JUnit testcase counts inconsistent");
+
+  const keys = ["failures", "errors", "skipped"] as const;
+  const completeSummary = keys.every(key => attributes[key] !== undefined);
+  const completeCases = cases === tests;
+
+  // When testcase detail is complete, verify every supplied suite counter
+  // against it. If attributes are absent, the testcase detail is authoritative.
+  if (completeCases) {
+    const observed = { failures, errors, skipped };
+    for (const key of keys) {
+      if (attributes[key] !== undefined && nonnegative(attributes[key]) !== observed[key]) {
+        throw new Error("JUnit suite attributes disagree with testcase outcomes");
+      }
+    }
+    return { failed: failures + errors, skipped };
+  }
+
+  if (!completeSummary) {
+    throw new Error("Incomplete JUnit outcome data: missing counters and testcases");
+  }
+
+  const declaredFailures = nonnegative(attributes.failures);
+  const declaredErrors = nonnegative(attributes.errors);
+  const declaredSkipped = nonnegative(attributes.skipped);
+  if (failures > declaredFailures || errors > declaredErrors || skipped > declaredSkipped) {
+    throw new Error("JUnit suite attributes disagree with testcase outcomes");
+  }
+  if (declaredFailures + declaredErrors + declaredSkipped > tests) {
+    throw new Error("JUnit counts inconsistent");
+  }
+  return { failed: declaredFailures + declaredErrors, skipped: declaredSkipped };
+}
+
 export function parseJunit(text: string): TestSummary {
   const stack: string[] = [];
   let rootSeen = false;
   let suiteCount = 0;
   let total = 0, failed = 0, skipped = 0;
+  let activeSuite: JunitSuite | null = null;
+  let activeCase: JunitCase | null = null;
+
+  const finishCase = () => {
+    if (!activeCase || !activeSuite) throw new Error("Unexpected JUnit testcase closing tag");
+    if (activeCase.skipped && (activeCase.failure || activeCase.error)) {
+      throw new Error("Conflicting JUnit testcase outcomes");
+    }
+    activeSuite.cases++;
+    if (activeCase.error) activeSuite.errors++;
+    else if (activeCase.failure) activeSuite.failures++;
+    else if (activeCase.skipped) activeSuite.skipped++;
+    activeCase = null;
+  };
+
+  const finishSuite = () => {
+    if (!activeSuite) throw new Error("Unexpected JUnit suite closing tag");
+    const outcomes = suiteOutcomes(activeSuite);
+    total = nonnegative(total + activeSuite.tests);
+    failed = nonnegative(failed + outcomes.failed);
+    skipped = nonnegative(skipped + outcomes.skipped);
+    if (failed + skipped > total) throw new Error("JUnit counts inconsistent");
+    activeSuite = null;
+  };
 
   for (const tag of xmlTags(text)) {
     if (tag.startsWith("/")) {
       const closing = /^\/\s*([A-Za-z_][\w.:-]*)\s*$/.exec(tag);
-      if (!closing || stack.pop() !== closing[1]) throw new Error("Malformed JUnit XML nesting");
+      if (!closing || stack.at(-1) !== closing[1]) throw new Error("Malformed JUnit XML nesting");
+      if (closing[1] === "testcase") finishCase();
+      if (closing[1] === "testsuite" && stack.filter(name => name === "testsuite").length === 1) {
+        finishSuite();
+      }
+      stack.pop();
       continue;
     }
+
     const opening = /^([A-Za-z_][\w.:-]*)([\s\S]*)$/.exec(tag);
     if (!opening) throw new Error("Malformed JUnit XML tag");
     const name = opening[1];
@@ -125,22 +204,38 @@ export function parseJunit(text: string): TestSummary {
       }
       rootSeen = true;
     }
-    // Suite totals normally include their nested descendants. Count a suite
-    // only if there is no ancestor suite; sibling suites are independent.
-    if (name === "testsuite" && !stack.includes("testsuite")) {
-      suiteCount++;
+
+    // Parents summarise nested suites, so only outermost suite totals are
+    // counted; testcase detail from any nested suite contributes to its parent.
+    const outermostSuite = name === "testsuite" && !stack.includes("testsuite");
+    if (outermostSuite) {
       if (attributes.tests === undefined) throw new Error("JUnit suite missing tests");
-      const count = nonnegative(attributes.tests);
-      const f = nonnegative(attributes.failures ?? "0") + nonnegative(attributes.errors ?? "0");
-      const s = nonnegative(attributes.skipped ?? "0");
-      if (f + s > count) throw new Error("JUnit counts inconsistent");
-      total = nonnegative(total + count);
-      failed = nonnegative(failed + f);
-      skipped = nonnegative(skipped + s);
+      suiteCount++;
+      activeSuite = {
+        tests: nonnegative(attributes.tests), attributes,
+        cases: 0, failures: 0, errors: 0, skipped: 0
+      };
     }
-    if (!selfClosing) stack.push(name);
+    if (name === "testcase") {
+      if (!activeSuite || activeCase) throw new Error("Invalid JUnit testcase nesting");
+      activeCase = { failure: false, error: false, skipped: false };
+    } else if (activeCase && (name === "failure" || name === "error" || name === "skipped")) {
+      activeCase[name === "failure" ? "failure" : name] = true;
+    } else if (!activeCase && (name === "failure" || name === "error" || name === "skipped") && activeSuite) {
+      throw new Error("JUnit outcome outside testcase");
+    }
+
+    if (selfClosing) {
+      if (name === "testcase") finishCase();
+      if (outermostSuite) finishSuite();
+    } else {
+      stack.push(name);
+    }
   }
-  if (!rootSeen || stack.length) throw new Error("Malformed JUnit XML document");
+
+  if (!rootSeen || stack.length || activeSuite || activeCase) {
+    throw new Error("Malformed JUnit XML document");
+  }
   if (suiteCount === 0) throw new Error("No JUnit testsuite");
   return { total, failed, skipped, passed: total - failed - skipped };
 }
