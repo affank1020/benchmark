@@ -54,6 +54,27 @@ Minimal artifact upload in an existing CI workflow:
 
 To have the two files appear at artifact root, stage them there in CI or adapt the paths in `examples/report-pr.yml`.
 
+## Reusable workflow integration (preview)
+
+For another repository, use the short [reusable reporter caller](examples/use-reusable-report.yml) rather than copying the full [publisher](examples/report-pr.yml). The consumer keeps a trusted `workflow_run` trigger on its default branch and grants `contents: read`, `actions: read`, `pull-requests: read` and `issues: write`. Configure `workflows: [CI]` to match the name of its existing pull-request CI workflow.
+
+The caller needs only:
+
+```yaml
+jobs:
+  report:
+    if: github.event.workflow_run.event == 'pull_request'
+    uses: affank1020/benchmark/.github/workflows/reusable-report.yml@main
+    with:
+      artifact_name: benchmark-ci
+```
+
+**Pin the reusable workflow to a reviewed immutable commit SHA instead of `@main` before production use.** The reusable workflow independently checks out Benchmark's reviewed PR #2 merge (`c4aa9c6a76d71e57809954cbc17627dcb250ab56`) as its trusted reporter implementation. Advancing that pinned implementation is a deliberate compatibility/security change.
+
+The consumer's own CI must upload an artifact named `benchmark-ci` (or the chosen `artifact_name`) containing `lcov.info` and `junit.xml` at its root. It should upload on failure (`if: always()`); missing inputs are represented as unavailable, never fabricated. The reusable workflow runs in the **consumer repository's** security context, not on PR-supplied code. No external installation or personal access token is required when the repository and workflow permissions allow reusable calls.
+
+This is a preview until a PR after this workflow's merge verifies cross-repository execution and fork behaviour. BENCHMARK's currently installed dogfood workflow remains separate and unchanged so that it can report on this pull request.
+
 ## Benchmark reporting on Benchmark
 
 This repository installs its own [trusted reporting workflow](.github/workflows/benchmark-report.yml), matching the public [integration example](examples/report-pr.yml). Once the workflow is merged into the **default branch**, completed PR CI runs produce a single updatable Benchmark comment on their own pull requests. The underlying CI keeps publishing `benchmark-ci` artifacts even when tests fail, so failed runs can still be reported. Coverage remains **Not reported** until CI generates `lcov.info`.
