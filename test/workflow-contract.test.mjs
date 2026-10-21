@@ -24,6 +24,7 @@ test("dogfood job only publishes trusted completed PR CI results", async () => {
   assert.match(workflow, /contents: read/);
   assert.match(workflow, /actions: read/);
   assert.match(workflow, /issues: write/);
+  assert.match(workflow, /pull-requests: write/);
   assert.match(workflow, /concurrency:[\s\S]*?cancel-in-progress: false/);
   assert.match(workflow, /repository: affank1020\/benchmark\s*\n\s*ref: main/);
   assert.match(workflow, /persist-credentials: false/);
