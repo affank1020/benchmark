@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseLcov, parseJunit, parseJest, renderMarkdown, normalizeCi } from "../src/core.ts";
+import { parseLcov, parseJunit, parseJest, renderMarkdown, normalizeCi, compareCoverage } from "../src/core.ts";
 
 test("LCOV aggregates records and reports absent branch metrics as unavailable", () => {
   const coverage = parseLcov("SF:a.ts\nLF:4\nLH:3\nFNF:2\nFNH:1\nend_of_record\nSF:b.ts\nLF:6\nLH:3\nend_of_record\n");
@@ -11,6 +11,41 @@ test("LCOV aggregates records and reports absent branch metrics as unavailable",
 test("LCOV rejects missing records and inconsistent totals", () => {
   assert.throws(() => parseLcov("LF:10\nLH:10"));
   assert.throws(() => parseLcov("SF:x\nLF:1\nLH:2\nend_of_record"));
+});
+test("coverage comparison reports signed percentage-point deltas", () => {
+  const current = parseLcov("LF:10\nLH:6\nFNF:4\nFNH:2\nBRF:4\nBRH:2\nend_of_record");
+  const baseline = parseLcov("LF:10\nLH:5\nFNF:4\nFNH:2\nBRF:4\nBRH:3\nend_of_record");
+  assert.deepEqual(compareCoverage(current, baseline), {
+    lines: 10, functions: 0, branches: -25
+  });
+  const report = renderMarkdown({
+    ci: "success", coverage: current, baselineCoverage: baseline
+  });
+  assert.match(report, /\| Metric \| Result \| Baseline \| Change \|/);
+  assert.match(report, /\| Line coverage \| 60\.00% \| 50\.00% \| \+10\.00 pp \|/);
+  assert.match(report, /\| Function coverage \| 50\.00% \| 50\.00% \| \+0\.00 pp \|/);
+  assert.match(report, /\| Branch coverage \| 50\.00% \| 75\.00% \| -25\.00 pp \|/);
+  assert.match(report, /file scopes must be comparable/);
+});
+test("unavailable baseline/current metrics never become zero or a fabricated delta", () => {
+  const current = parseLcov("LF:10\nLH:0\nFNF:0\nFNH:0\nBRF:4\nBRH:0\nend_of_record");
+  const baseline = parseLcov("LF:10\nLH:5\nFNF:0\nFNH:0\nBRF:0\nBRH:0\nend_of_record");
+  assert.deepEqual(compareCoverage(current, baseline), {
+    lines: -50, functions: null, branches: null
+  });
+  assert.deepEqual(compareCoverage(undefined, baseline), {
+    lines: null, functions: null, branches: null
+  });
+  assert.equal(compareCoverage(current, undefined), undefined);
+  const report = renderMarkdown({ ci: "failure", baselineCoverage: baseline });
+  assert.match(report, /\| Line coverage \| Not reported \| 50\.00% \| Not reported \|/);
+  assert.match(report, /\| Branch coverage \| Not reported \| Not reported \| Not reported \|/);
+});
+test("report without baseline retains the original two-column format", () => {
+  const coverage = parseLcov("LF:1\nLH:1\nend_of_record");
+  const report = renderMarkdown({ ci: "success", coverage });
+  assert.match(report, /\| Metric \| Result \|\n\| --- \| --- \|/);
+  assert.doesNotMatch(report, /\| Baseline \||percentage points|\bpp\b/);
 });
 test("JUnit sums suites, errors count as failures", () => {
   const result = parseJunit('<testsuites><testsuite name="a" tests="4" failures="1" errors="1" skipped="1"></testsuite><testsuite tests="2" failures="0" errors="0" skipped="0"/></testsuites>');
