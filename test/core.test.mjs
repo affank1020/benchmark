@@ -13,7 +13,7 @@ test("LCOV rejects missing records and inconsistent totals", () => {
   assert.throws(() => parseLcov("SF:x\nLF:1\nLH:2\nend_of_record"));
 });
 test("JUnit sums suites, errors count as failures", () => {
-  const result = parseJunit('<testsuites><testsuite name="a" tests="4" failures="1" errors="1" skipped="1"></testsuite><testsuite tests="2" failures="0"/></testsuites>');
+  const result = parseJunit('<testsuites><testsuite name="a" tests="4" failures="1" errors="1" skipped="1"></testsuite><testsuite tests="2" failures="0" errors="0" skipped="0"/></testsuites>');
   assert.deepEqual(result, { total: 6, passed: 3, failed: 2, skipped: 1 });
 });
 test("JUnit avoids double counting hierarchical suite summaries", () => {
@@ -29,7 +29,7 @@ test("JUnit avoids double counting hierarchical suite summaries", () => {
   assert.deepEqual(parseJunit(xml), { total: 2, passed: 1, failed: 1, skipped: 0 });
 });
 test("JUnit sums sibling top-level suites without summing nested children", () => {
-  const xml = '<testsuites><testsuite tests="2" failures="1"><testsuite tests="2" failures="1"/></testsuite><testsuite tests="3" skipped="1"/></testsuites>';
+  const xml = '<testsuites><testsuite tests="2" failures="1" errors="0" skipped="0"><testsuite tests="2" failures="1"/></testsuite><testsuite tests="3" failures="0" errors="0" skipped="1"/></testsuites>';
   assert.deepEqual(parseJunit(xml), { total: 5, passed: 3, failed: 1, skipped: 1 });
 });
 test("JUnit handles greater-than signs in quoted attributes and ignores comments and CDATA", () => {
@@ -37,15 +37,51 @@ test("JUnit handles greater-than signs in quoted attributes and ignores comments
     <!-- <testsuite tests="999"/> -->
     <testsuite name="value > threshold" tests="2" failures="1">
       <testcase name='when x > y'><![CDATA[<testsuite tests="999"/>]]></testcase>
+      <testcase name="fails"><failure message="actual failure"/></testcase>
     </testsuite>
   </testsuites>`;
   assert.deepEqual(parseJunit(xml), { total: 2, passed: 1, failed: 1, skipped: 0 });
 });
 test("JUnit rejects malformed/nested unsupported XML instead of fabricating totals", () => {
   assert.throws(() => parseJunit('<testsuites><testsuite tests="2"></testsuites>'), /nesting/);
-  assert.throws(() => parseJunit('<testsuites><testsuite tests="2"/></testsuites><testsuite tests="3"/>'), /root/);
+  assert.throws(() => parseJunit('<testsuites><testsuite tests="2" failures="0" errors="0" skipped="0"/></testsuites><testsuite tests="3"/>'), /root/);
   assert.throws(() => parseJunit('<!DOCTYPE testsuites><testsuites><testsuite tests="2"/></testsuites>'), /Unsupported XML/);
   assert.throws(() => parseJunit('<testsuites><testsuite name="unbounded"><testsuite tests="2"/></testsuite></testsuites>'), /missing tests/);
+});
+test("JUnit derives missing suite failures from testcase outcomes", () => {
+  const xml = '<testsuite tests="1"><testcase name="fails"><failure message="boom"/></testcase></testsuite>';
+  assert.deepEqual(parseJunit(xml), { total: 1, passed: 0, failed: 1, skipped: 0 });
+});
+test("JUnit derives errors and skipped cases without optional suite counters", () => {
+  const xml = '<testsuites><testsuite tests="3" failures="0">' +
+    '<testcase name="passes"/><testcase name="errors"><error/></testcase>' +
+    '<testcase name="skips"><skipped/></testcase></testsuite></testsuites>';
+  assert.deepEqual(parseJunit(xml), { total: 3, passed: 1, failed: 1, skipped: 1 });
+});
+test("JUnit validates declared failure, error, and skipped counters against complete cases", () => {
+  assert.throws(() => parseJunit(
+    '<testsuite tests="1" failures="0"><testcase><failure/></testcase></testsuite>'
+  ), /disagree/);
+  assert.throws(() => parseJunit(
+    '<testsuite tests="1" errors="0"><testcase><error/></testcase></testsuite>'
+  ), /disagree/);
+  assert.throws(() => parseJunit(
+    '<testsuite tests="1" skipped="0"><testcase><skipped/></testcase></testsuite>'
+  ), /disagree/);
+});
+test("JUnit rejects incomplete outcome evidence instead of reporting a false pass", () => {
+  assert.throws(() => parseJunit('<testsuite tests="1"/>'), /Incomplete JUnit outcome/);
+  assert.throws(() => parseJunit(
+    '<testsuite tests="2"><testcase><failure/></testcase></testsuite>'
+  ), /Incomplete JUnit outcome/);
+  assert.throws(() => parseJunit(
+    '<testsuite tests="1" failures="0" errors="0" skipped="0"><testcase><failure/></testcase></testsuite>'
+  ), /disagree/);
+});
+test("JUnit tolerates omitted suite counters when the suite declares zero tests", () => {
+  assert.deepEqual(parseJunit('<testsuite tests="0"/>'), {
+    total: 0, passed: 0, failed: 0, skipped: 0
+  });
 });
 test("Jest JSON reports counts without requiring test suite details", () => {
   assert.deepEqual(parseJest(JSON.stringify({ numTotalTests: 8, numFailedTests: 1, numPendingTests: 2 })), { total: 8, passed: 5, failed: 1, skipped: 2 });
