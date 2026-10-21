@@ -12,7 +12,15 @@ test("reusable workflow is callable, artifact-parametrized and uses pinned trust
   assert.match(reusable, /name: \$\{\{ inputs\.artifact_name \}\}/);
   assert.match(reusable, /repository: affank1020\/benchmark\s*\n\s*ref: [a-f0-9]{40}/);
   assert.match(reusable, /issues: write\s*\n\s*pull-requests: write/);
-  assert.doesNotMatch(reusable, /ref: main/);
+  assert.doesNotMatch(reusable, /\bref:\s*(main|master|HEAD|v\d+|\$\{\{)/);
+  const fullExample = await load("../examples/report-pr.yml");
+  const installed = await load("../.github/workflows/benchmark-report.yml");
+  const pinned = /repository: affank1020\/benchmark\s*\n\s*ref: ([a-f0-9]{40})\b/;
+  for (const workflow of [fullExample, installed, reusable]) {
+    assert.match(workflow, pinned);
+  }
+  assert.equal(fullExample.match(pinned)[1], reusable.match(pinned)[1]);
+  assert.equal(installed.match(pinned)[1], reusable.match(pinned)[1]);
   assert.doesNotMatch(reusable, /pull_request_target/);
 });
 
@@ -21,10 +29,6 @@ test("reusable workflow preserves the trusted publisher's complete control flow"
   const installed = await load("../.github/workflows/benchmark-report.yml");
   const coreSection = value => value.slice(value.indexOf("permissions:\n"));
   let expected = coreSection(installed)
-    .replace(
-      "ref: main # Pin a released commit SHA once available.",
-      "ref: c4aa9c6a76d71e57809954cbc17627dcb250ab56 # Trusted Benchmark release baseline (PR #2 merge)"
-    )
     .replace(
       "        uses: actions/github-script@v7\n        with:\n          script: |\n            const { owner, repo } = context.repo;\n            const run_id = context.payload.workflow_run.id;",
       "        uses: actions/github-script@v7\n        env:\n          BENCHMARK_ARTIFACT_NAME: ${{ inputs.artifact_name }}\n        with:\n          script: |\n            const { owner, repo } = context.repo;\n            const run_id = context.payload.workflow_run.id;"
