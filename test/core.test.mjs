@@ -19,6 +19,17 @@ test("JUnit sums suites, errors count as failures", () => {
 test("Jest JSON reports counts without requiring test suite details", () => {
   assert.deepEqual(parseJest(JSON.stringify({ numTotalTests: 8, numFailedTests: 1, numPendingTests: 2 })), { total: 8, passed: 5, failed: 1, skipped: 2 });
 });
+test("Jest TODOs are non-passing and counted as skipped", () => {
+  assert.deepEqual(parseJest(JSON.stringify({
+    numTotalTests: 2, numPassedTests: 1, numFailedTests: 0,
+    numPendingTests: 0, numTodoTests: 1
+  })), { total: 2, passed: 1, failed: 0, skipped: 1 });
+});
+test("Jest rejects contradictory explicit passed/TODO totals", () => {
+  assert.throws(() => parseJest(JSON.stringify({
+    numTotalTests: 2, numPassedTests: 2, numTodoTests: 1
+  })), /Jest counts inconsistent/);
+});
 test("Failures are always visible even when no artifacts were produced", () => {
   const markdown = renderMarkdown({ ci: "failure", diagnostics: ["Coverage artifact missing or invalid"] });
   assert.match(markdown, /❌ Failed/);

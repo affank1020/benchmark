@@ -66,9 +66,14 @@ export function parseJest(text: string): TestSummary {
   const obj = data as Record<string, unknown>;
   const total = nonnegative(obj.numTotalTests);
   const failed = nonnegative(obj.numFailedTests ?? 0);
-  const skipped = nonnegative(obj.numPendingTests ?? 0);
+  // Jest counts TODOs in numTotalTests, but they are not passing tests.
+  const skipped = nonnegative(obj.numPendingTests ?? 0) + nonnegative(obj.numTodoTests ?? 0);
   if (failed + skipped > total) throw new Error("Jest counts inconsistent");
-  return { total, failed, skipped, passed: total - failed - skipped };
+  const passed = obj.numPassedTests === undefined
+    ? total - failed - skipped
+    : nonnegative(obj.numPassedTests);
+  if (passed + failed + skipped !== total) throw new Error("Jest counts inconsistent");
+  return { total, failed, skipped, passed };
 }
 
 export function normalizeCi(value: string): string {

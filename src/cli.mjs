@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { readFile, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
+import { readBoundedText } from "./read-input.mjs";
 import { parseJest, parseJunit, parseLcov, renderMarkdown, normalizeCi } from "./core.ts";
 
 const args = new Map();
@@ -16,8 +17,7 @@ async function optionalReport(flag, parser, failureMessage) {
   const path = args.get(flag);
   if (!path) return undefined;
   try {
-    const content = await readFile(path, "utf8");
-    if (Buffer.byteLength(content) > 10 * 1024 * 1024) throw new Error("File too large");
+    const content = await readBoundedText(path);
     return parser(content);
   } catch {
     diagnostics.push(failureMessage);

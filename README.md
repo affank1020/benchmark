@@ -6,7 +6,7 @@
 
 The current MVP provides:
 - LCOV line, function and branch coverage parsing.
-- JUnit XML and Jest JSON test-summary parsing.
+- JUnit XML and Jest JSON test-summary parsing (Jest TODO cases count as skipped, not passed).
 - CI conclusion reporting, including failed, cancelled and timed-out runs.
 - Deterministic Markdown output, JSON output and explicit unavailable metrics.
 - A trusted `workflow_run` integration example that updates a single bot comment.
@@ -56,7 +56,7 @@ To have the two files appear at artifact root, stage them there in CI or adapt t
 
 ## Security model
 
-The reporter uses the trusted default-branch workflow via `workflow_run`. Untrusted artifacts are read **only as bounded text/metrics**, never executed. The publisher resolves the PR through GitHub and checks the run's head SHA against the current PR head to prevent a stale or unrelated run posting. Do not replace the reporter's checkout with a checkout of the untrusted PR. Keep the reporting workflow on the default branch.
+The reporter uses the trusted default-branch workflow via `workflow_run`. Untrusted artifacts are read **only as bounded text/metrics**, never executed. The publisher serializes report jobs per PR source and checks the run's current attempt, newest completed workflow run, and PR head SHA immediately before posting to avoid duplicate or stale reports. The parser also enforces a 10 MiB per-file read limit and the sample workflow checks compressed artifact size (25 MiB) before downloading. Do not replace the reporter's checkout with a checkout of the untrusted PR. Keep the reporting workflow on the default branch.
 
 This is a first milestone, **not yet a stable or published reusable action**. Next: robust multi-job artifact discovery, historical baselines and coverage-delta comparisons, reusable action packaging, and integration tests for fork PRs.
 
