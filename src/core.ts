@@ -154,16 +154,25 @@ export function parseJunit(text: string): TestSummary {
   let total = 0, failed = 0, skipped = 0;
   let activeSuite: JunitSuite | null = null;
   let activeCase: JunitCase | null = null;
+  // Node.js 22's built-in JUnit reporter emits direct testcase children of
+  // <testsuites>, with no <testsuite> element or aggregate test counters.
+  // Keep these distinct from wrapped suites so their totals are counted once.
+  const rootCases: JunitSuite = {
+    tests: 0, attributes: Object.create(null),
+    cases: 0, failures: 0, errors: 0, skipped: 0
+  };
+  let rootAttributes: Record<string, string> | null = null;
 
   const finishCase = () => {
-    if (!activeCase || !activeSuite) throw new Error("Unexpected JUnit testcase closing tag");
+    if (!activeCase) throw new Error("Unexpected JUnit testcase closing tag");
     if (activeCase.skipped && (activeCase.failure || activeCase.error)) {
       throw new Error("Conflicting JUnit testcase outcomes");
     }
-    activeSuite.cases++;
-    if (activeCase.error) activeSuite.errors++;
-    else if (activeCase.failure) activeSuite.failures++;
-    else if (activeCase.skipped) activeSuite.skipped++;
+    const target = activeSuite ?? rootCases;
+    target.cases++;
+    if (activeCase.error) target.errors++;
+    else if (activeCase.failure) target.failures++;
+    else if (activeCase.skipped) target.skipped++;
     activeCase = null;
   };
 
@@ -203,6 +212,7 @@ export function parseJunit(text: string): TestSummary {
         throw new Error("Invalid JUnit XML root");
       }
       rootSeen = true;
+      if (name === "testsuites") rootAttributes = attributes;
     }
 
     // Parents summarise nested suites, so only outermost suite totals are
@@ -217,7 +227,11 @@ export function parseJunit(text: string): TestSummary {
       };
     }
     if (name === "testcase") {
-      if (!activeSuite || activeCase) throw new Error("Invalid JUnit testcase nesting");
+      const directRootCase = !activeSuite &&
+        stack.length === 1 && stack[0] === "testsuites";
+      if (activeCase || (!activeSuite && !directRootCase)) {
+        throw new Error("Invalid JUnit testcase nesting");
+      }
       activeCase = { failure: false, error: false, skipped: false };
     } else if (activeCase && (name === "failure" || name === "error" || name === "skipped")) {
       activeCase[name === "failure" ? "failure" : name] = true;
@@ -236,7 +250,29 @@ export function parseJunit(text: string): TestSummary {
   if (!rootSeen || stack.length || activeSuite || activeCase) {
     throw new Error("Malformed JUnit XML document");
   }
-  if (suiteCount === 0) throw new Error("No JUnit testsuite");
+  if (suiteCount === 0 && rootCases.cases === 0) {
+    throw new Error("No JUnit testsuite or testcase");
+  }
+
+  total = nonnegative(total + rootCases.cases);
+  failed = nonnegative(failed + rootCases.failures + rootCases.errors);
+  skipped = nonnegative(skipped + rootCases.skipped);
+  if (failed + skipped > total) throw new Error("JUnit counts inconsistent");
+
+  // Some JUnit producers also include root-level aggregate counters. When
+  // present they must not contradict the individual suites/testcases.
+  if (rootAttributes) {
+    if (rootAttributes.tests !== undefined && nonnegative(rootAttributes.tests) !== total) {
+      throw new Error("JUnit root test counts disagree");
+    }
+    if (rootAttributes.skipped !== undefined && nonnegative(rootAttributes.skipped) !== skipped) {
+      throw new Error("JUnit root skipped counts disagree");
+    }
+    if (rootAttributes.failures !== undefined && rootAttributes.errors !== undefined &&
+        nonnegative(rootAttributes.failures) + nonnegative(rootAttributes.errors) !== failed) {
+      throw new Error("JUnit root failure counts disagree");
+    }
+  }
   return { total, failed, skipped, passed: total - failed - skipped };
 }
 
