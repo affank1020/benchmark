@@ -5,7 +5,7 @@
 ## First milestone
 
 The current MVP provides:
-- LCOV line, function and branch coverage parsing.
+- LCOV line, function and branch coverage parsing, with optional comparisons against a supplied LCOV baseline.
 - JUnit XML and Jest JSON test-summary parsing (Jest TODO cases count as skipped, not passed).
 - CI conclusion reporting, including failed, cancelled and timed-out runs.
 - Deterministic Markdown output, JSON output and explicit unavailable metrics.
@@ -23,6 +23,21 @@ node --experimental-strip-types src/cli.mjs \
   --output benchmark.md \
   --json benchmark.json
 ```
+
+## Coverage comparison (manual baseline)
+
+Use `--baseline-coverage PATH` to compare current LCOV metrics against an explicitly supplied baseline LCOV file. This first step **does not automatically locate a base-branch report**.
+
+```bash
+node --experimental-strip-types src/cli.mjs \
+  --coverage ./coverage/current/lcov.info \
+  --baseline-coverage ./coverage/base/lcov.info \
+  --ci success --json benchmark.json
+```
+
+The Markdown report adds a baseline and change column. Change means **percentage points**, so a shift from 60% to 55% is **-5.00 pp**, not a 5% relative decline. The JSON includes `baselineCoverage` and a per-metric `coverageChange` object, whose values are percentage-point numbers or `null` if either denominator is unavailable. Zero measured lines/functions/branches must not be mistaken for 0% coverage.
+
+The two input files must represent comparable source/file scopes and instrumentation for the difference to be meaningful. A missing, malformed or oversized baseline is reported as unavailable without changing the normal current coverage results. Both files are subject to the existing bounded-read limits. This option only affects local/report CLI output for now; the currently pinned GitHub Actions publisher remains on the previously reviewed version until intentionally upgraded.
 
 For Jest JSON summaries, add `--tests-format jest`. Paths may be omitted. Missing or unparseable files are reported as unavailable rather than falsely passing. Exit code zero means a report was rendered; it **does not indicate CI passed**.
 
