@@ -11,6 +11,7 @@ test("reusable workflow is callable, artifact-parametrized and uses pinned trust
   assert.match(reusable, /BENCHMARK_ARTIFACT_NAME: \$\{\{ inputs\.artifact_name \}\}/);
   assert.match(reusable, /name: \$\{\{ inputs\.artifact_name \}\}/);
   assert.match(reusable, /repository: affank1020\/benchmark\s*\n\s*ref: [a-f0-9]{40}/);
+  assert.match(reusable, /issues: write\s*\n\s*pull-requests: write/);
   assert.doesNotMatch(reusable, /ref: main/);
   assert.doesNotMatch(reusable, /pull_request_target/);
 });
@@ -40,7 +41,14 @@ test("reusable workflow preserves the trusted publisher's complete control flow"
 test("short consumer example is a trusted workflow_run caller, not PR code execution", async () => {
   const consumer = await load("../examples/use-reusable-report.yml");
   assert.match(consumer, /workflow_run:\s*\n\s*workflows: \[CI\]\s*\n\s*types: \[completed\]/);
-  assert.match(consumer, /uses: affank1020\/benchmark\/\.github\/workflows\/reusable-report\.yml@main/);
+  const ref = /uses: affank1020\/benchmark\/\.github\/workflows\/reusable-report\.yml@([^\s]+)/.exec(consumer)?.[1];
+  assert.ok(ref, "Reusable workflow reference must be present");
+  assert.ok(
+    /^[a-f0-9]{40}$/.test(ref) || ref === "REPLACE_WITH_REVIEWED_40_CHAR_RELEASE_SHA",
+    "Caller must pin a reviewed immutable SHA or use a conspicuous non-runnable placeholder"
+  );
+  assert.notEqual(ref, "main");
+  assert.match(consumer, /pull-requests: write/);
   assert.match(consumer, /if: github\.event\.workflow_run\.event == 'pull_request'/);
   assert.match(consumer, /issues: write/);
   assert.match(consumer, /actions: read/);
