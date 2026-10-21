@@ -26,7 +26,11 @@ test("dogfood job only publishes trusted completed PR CI results", async () => {
   assert.match(workflow, /issues: write/);
   assert.match(workflow, /pull-requests: write/);
   assert.match(workflow, /concurrency:[\s\S]*?cancel-in-progress: false/);
-  assert.match(workflow, /repository: affank1020\/benchmark\s*\n\s*ref: main/);
+  assert.match(workflow, /repository: affank1020\/benchmark\s*\n\s*ref: [a-f0-9]{40}\b/);
+  assert.doesNotMatch(workflow, /\bref:\s*(main|master|HEAD|v\d+|\$\{\{)/);
+  const publicExample = await source("../examples/report-pr.yml");
+  assert.match(publicExample, /repository: affank1020\/benchmark\s*\n\s*ref: [a-f0-9]{40}\b/);
+  assert.doesNotMatch(publicExample, /\bref:\s*(main|master|HEAD|v\d+|\$\{\{)/);
   assert.match(workflow, /persist-credentials: false/);
   assert.match(workflow, /policy\.resolveRunPr\(/);
   assert.ok(
