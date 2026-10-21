@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "atlas/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Run unit tests
+        run: node --experimental-strip-types --test --test-reporter=junit test/*.test.mjs > junit.xml
+      - name: Smoke-test actual Node.js JUnit output
+        if: always()
+        run: |
+          test -s junit.xml
+          node --experimental-strip-types src/cli.mjs --tests junit.xml --ci failure --json benchmark-smoke.json > benchmark-smoke.md
+          node -e 'const fs = require("node:fs"); const report = JSON.parse(fs.readFileSync("benchmark-smoke.json", "utf8")); if (!report.tests || report.tests.total < 1) { console.error("Benchmark could not parse its CI JUnit artifact"); process.exit(1); }'
+      - name: Upload Benchmark inputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-ci
+          path: junit.xml
+          if-no-files-found: ignore

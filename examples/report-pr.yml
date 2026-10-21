@@ -1,0 +1,156 @@
+# Copy this file to .github/workflows/benchmark-report.yml in a consuming repo.
+# Edit 'workflows: [CI]' to the exact name of the existing PR CI workflow.
+name: Benchmark PR Report
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+  pull-requests: read
+
+# A single publisher per PR head source (including the fork fallback when
+# workflow_run.pull_requests is empty). GH may replace an older pending run;
+# publish-time run freshness checks below cover delayed/stale completions.
+concurrency:
+  group: benchmark-report-${{ github.repository_id }}-${{ github.event.workflow_run.pull_requests[0].number || format('{0}-{1}', github.event.workflow_run.head_repository.id, github.event.workflow_run.head_branch) }}
+  cancel-in-progress: false
+
+jobs:
+  report:
+    if: github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve current PR safely
+        id: pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            const { owner, repo } = context.repo;
+            let prs = run.pull_requests || [];
+            if (!prs.length) {
+              const associated = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+                owner, repo, commit_sha: run.head_sha, per_page: 100
+              });
+              prs = associated.data;
+            }
+            for (const candidate of prs) {
+              const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: candidate.number });
+              if (pr.state === 'open' && (pr.head.sha === run.head_sha || pr.merge_commit_sha === run.head_sha)) {
+                core.setOutput('number', String(pr.number));
+                return;
+              }
+            }
+            core.warning('No open PR matching this CI run head SHA; not publishing a comment.');
+      - name: Checkout trusted Benchmark implementation
+        if: steps.pr.outputs.number != ''
+        uses: actions/checkout@v4
+        with:
+          repository: affank1020/benchmark
+          ref: main # Pin a released commit SHA once available.
+          path: benchmark
+          persist-credentials: false
+      - name: Set up supported Node.js runtime
+        if: steps.pr.outputs.number != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Preflight artifact download size
+        if: steps.pr.outputs.number != ''
+        id: artifact
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const run_id = context.payload.workflow_run.id;
+            const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
+              owner, repo, run_id, per_page: 100
+            });
+            const source = artifacts.find(a => a.name === 'benchmark-ci' && !a.expired);
+            if (!source) {
+              core.warning('Benchmark CI artifact not available.');
+            } else if (source.size_in_bytes > 25 * 1024 * 1024) {
+              core.warning('Benchmark CI artifact exceeds 25 MiB compressed limit.');
+            } else {
+              core.setOutput('present', 'true');
+            }
+      - name: Download existing CI report artifact
+        if: steps.artifact.outputs.present == 'true'
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          name: benchmark-ci
+          path: artifacts
+      - name: Generate quality report (even after CI failure)
+        if: steps.pr.outputs.number != ''
+        env:
+          CI_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+        run: |
+          node --version
+          node --experimental-strip-types benchmark/src/cli.mjs \
+            --coverage artifacts/lcov.info \
+            --tests artifacts/junit.xml \
+            --ci "$CI_CONCLUSION" \
+            --output benchmark-report.md
+      - name: Update one PR comment if still current
+        if: steps.pr.outputs.number != ''
+        uses: actions/github-script@v7
+        env:
+          BENCHMARK_PR_NUMBER: ${{ steps.pr.outputs.number }}
+        with:
+          script: |
+            const { readFileSync } = require('fs');
+            const { pathToFileURL } = require('url');
+            const policy = await import(pathToFileURL(
+              process.env.GITHUB_WORKSPACE + '/benchmark/src/publish-policy.mjs'
+            ).href);
+            const body = readFileSync('benchmark-report.md', 'utf8');
+            if (body.length > 20000) throw new Error('Benchmark output too large');
+            const marker = '<!-- benchmark-pr-quality-report -->';
+            if (!body.includes(marker)) throw new Error('Missing report marker');
+            const { owner, repo } = context.repo;
+            const issue_number = Number(process.env.BENCHMARK_PR_NUMBER);
+            if (!Number.isSafeInteger(issue_number) || issue_number < 1) throw new Error('Invalid PR');
+            const run = context.payload.workflow_run;
+            // Immediately before the write, confirm that neither the PR head
+            // nor the source CI run has been superseded, including reruns.
+            const { data: current } = await github.rest.pulls.get({
+              owner, repo, pull_number: issue_number
+            });
+            if (!policy.matchesRunToPr(run, current)) {
+              core.warning('PR head changed or PR closed; skipping stale report.');
+              return;
+            }
+            const { data: currentRun } = await github.rest.actions.getWorkflowRun({
+              owner, repo, run_id: run.id
+            });
+            if (currentRun.run_attempt !== run.run_attempt || currentRun.status !== 'completed') {
+              core.warning('Source CI run has been rerun; skipping stale report.');
+              return;
+            }
+            const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+              owner, repo, workflow_id: run.workflow_id,
+              head_sha: run.head_sha, event: 'pull_request',
+              status: 'completed', per_page: 100
+            });
+            if (!policy.isLatestCompletedRun(run, runs)) {
+              core.warning('A newer CI result exists; skipping stale report.');
+              return;
+            }
+            // This read/modify/write is serialized by workflow concurrency.
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number, per_page: 100
+            });
+            const previous = policy.findOwnedReportComment(comments, marker);
+            if (previous) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: previous.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
