@@ -11,7 +11,7 @@ permissions:
   contents: read
   actions: read
   issues: write
-  pull-requests: read
+  pull-requests: write
 
 # Serialize per source repository and branch, including forks, regardless of
 # whether workflow_run.pull_requests is populated. GH can replace pending runs;
