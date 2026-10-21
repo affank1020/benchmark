@@ -43,20 +43,105 @@ export function parseLcov(text: string): Coverage {
   return { lines: rate(lh, lf), functions: rate(fnh, fnf), branches: rate(brh, brf) };
 }
 
-export function parseJunit(text: string): TestSummary {
-  const suites = [...text.matchAll(/<testsuite\b([^>]*)>/g)];
-  if (suites.length === 0) throw new Error("No JUnit testsuite");
-  let total = 0, failed = 0, skipped = 0;
-  for (const [, attributes] of suites) {
-    const values: Record<string, string> = {};
-    for (const match of attributes.matchAll(/([a-zA-Z][\w-]*)\s*=\s*(["'])(.*?)\2/g)) values[match[1]] = match[3];
-    if (values.tests === undefined) throw new Error("JUnit suite missing tests");
-    const count = nonnegative(values.tests);
-    const f = nonnegative(values.failures ?? "0") + nonnegative(values.errors ?? "0");
-    const s = nonnegative(values.skipped ?? "0");
-    if (f + s > count) throw new Error("JUnit counts inconsistent");
-    total += count; failed += f; skipped += s;
+// Recognise XML tags without treating a '>' inside quoted attributes as an
+// element boundary. JUnit files are bounded by the CLI before parsing.
+function* xmlTags(text: string): Generator<string> {
+  let cursor = 0;
+  while (cursor < text.length) {
+    const start = text.indexOf("<", cursor);
+    if (start < 0) break;
+    if (text.startsWith("<!--", start) || text.startsWith("<![CDATA[", start)) {
+      const comment = text.startsWith("<!--", start);
+      const terminator = comment ? "-->" : "]]>";
+      const end = text.indexOf(terminator, start + (comment ? 4 : 9));
+      if (end < 0) throw new Error("Unterminated XML comment or CDATA");
+      cursor = end + terminator.length;
+      continue;
+    }
+    if (text.startsWith("<?", start)) {
+      const end = text.indexOf("?>", start + 2);
+      if (end < 0) throw new Error("Unterminated XML processing instruction");
+      cursor = end + 2;
+      continue;
+    }
+    // External entities/DTDs are unnecessary for JUnit metrics and must never
+    // be expanded or interpreted by this parser.
+    if (text.startsWith("<!", start)) throw new Error("Unsupported XML declaration");
+    let quote: string | null = null;
+    let end = start + 1;
+    for (; end < text.length; end++) {
+      const c = text[end];
+      if (quote) {
+        if (c === quote) quote = null;
+      } else if (c === '"' || c === "'") {
+        quote = c;
+      } else if (c === ">") {
+        break;
+      }
+    }
+    if (end === text.length) throw new Error("Unterminated XML tag");
+    yield text.slice(start + 1, end).trim();
+    cursor = end + 1;
   }
+}
+
+function xmlAttributes(text: string): Record<string, string> {
+  const result: Record<string, string> = Object.create(null);
+  let remaining = text;
+  while (remaining.trim()) {
+    const match = /^\s+([A-Za-z_:][\w.:-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/.exec(remaining);
+    if (!match) throw new Error("Invalid JUnit XML attribute");
+    if (Object.hasOwn(result, match[1])) throw new Error("Duplicate JUnit XML attribute");
+    result[match[1]] = match[2] ?? match[3];
+    remaining = remaining.slice(match[0].length);
+  }
+  return result;
+}
+
+export function parseJunit(text: string): TestSummary {
+  const stack: string[] = [];
+  let rootSeen = false;
+  let suiteCount = 0;
+  let total = 0, failed = 0, skipped = 0;
+
+  for (const tag of xmlTags(text)) {
+    if (tag.startsWith("/")) {
+      const closing = /^\/\s*([A-Za-z_][\w.:-]*)\s*$/.exec(tag);
+      if (!closing || stack.pop() !== closing[1]) throw new Error("Malformed JUnit XML nesting");
+      continue;
+    }
+    const opening = /^([A-Za-z_][\w.:-]*)([\s\S]*)$/.exec(tag);
+    if (!opening) throw new Error("Malformed JUnit XML tag");
+    const name = opening[1];
+    const selfClosing = /\/\s*$/.test(opening[2]);
+    const attributeText = selfClosing
+      ? opening[2].replace(/\/\s*$/, "")
+      : opening[2];
+    const attributes = xmlAttributes(attributeText);
+
+    if (!stack.length) {
+      if (rootSeen || (name !== "testsuite" && name !== "testsuites")) {
+        throw new Error("Invalid JUnit XML root");
+      }
+      rootSeen = true;
+    }
+    // Suite totals normally include their nested descendants. Count a suite
+    // only if there is no ancestor suite; sibling suites are independent.
+    if (name === "testsuite" && !stack.includes("testsuite")) {
+      suiteCount++;
+      if (attributes.tests === undefined) throw new Error("JUnit suite missing tests");
+      const count = nonnegative(attributes.tests);
+      const f = nonnegative(attributes.failures ?? "0") + nonnegative(attributes.errors ?? "0");
+      const s = nonnegative(attributes.skipped ?? "0");
+      if (f + s > count) throw new Error("JUnit counts inconsistent");
+      total = nonnegative(total + count);
+      failed = nonnegative(failed + f);
+      skipped = nonnegative(skipped + s);
+    }
+    if (!selfClosing) stack.push(name);
+  }
+  if (!rootSeen || stack.length) throw new Error("Malformed JUnit XML document");
+  if (suiteCount === 0) throw new Error("No JUnit testsuite");
   return { total, failed, skipped, passed: total - failed - skipped };
 }
 
