@@ -54,6 +54,12 @@ Minimal artifact upload in an existing CI workflow:
 
 To have the two files appear at artifact root, stage them there in CI or adapt the paths in `examples/report-pr.yml`.
 
+## Benchmark reporting on Benchmark
+
+This repository installs its own [trusted reporting workflow](.github/workflows/benchmark-report.yml), matching the public [integration example](examples/report-pr.yml). Once the workflow is merged into the **default branch**, completed PR CI runs produce a single updatable Benchmark comment on their own pull requests. The underlying CI keeps publishing `benchmark-ci` artifacts even when tests fail, so failed runs can still be reported. Coverage remains **Not reported** until CI generates `lcov.info`.
+
+The reporting workflow uses `workflow_run`, which GitHub only activates from the default branch. A change to the reporter workflow in a PR cannot validate its own publishing behaviour until merged; subsequent PRs exercise the end-to-end path. `test/workflow-contract.test.mjs` guards drift between the installed workflow and the example. For new repositories, follow the integration instructions below instead of copying the Benchmark-specific workflow without review.
+
 ## Security model
 
 The reporter uses the trusted default-branch workflow via `workflow_run`. Untrusted artifacts are read **only as bounded text/metrics**, never executed. The publisher serializes report jobs per PR source and checks the run's current attempt, newest completed workflow run, and PR head SHA immediately before posting to avoid duplicate or stale reports. The parser also enforces a 10 MiB per-file read limit and the sample workflow checks compressed artifact size (25 MiB) before downloading. Do not replace the reporter's checkout with a checkout of the untrusted PR. Keep the reporting workflow on the default branch.
