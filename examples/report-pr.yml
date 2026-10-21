@@ -34,7 +34,7 @@ jobs:
             }
             for (const candidate of prs) {
               const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: candidate.number });
-              if (pr.state === 'open' && pr.head.sha === run.head_sha) {
+              if (pr.state === 'open' && (pr.head.sha === run.head_sha || pr.merge_commit_sha === run.head_sha)) {
                 core.setOutput('number', String(pr.number));
                 return;
               }
@@ -48,6 +48,11 @@ jobs:
           ref: main # Pin a released commit SHA once available.
           path: benchmark
           persist-credentials: false
+      - name: Set up supported Node.js runtime
+        if: steps.pr.outputs.number != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - name: Download existing CI report artifact
         if: steps.pr.outputs.number != ''
         continue-on-error: true
