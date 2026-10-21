@@ -3,10 +3,31 @@ export type Coverage = {
   functions: { hit: number; found: number; percent: number | null };
   branches: { hit: number; found: number; percent: number | null };
 };
+export type CoverageChange = {
+  lines: number | null;
+  functions: number | null;
+  branches: number | null;
+};
+// Percentage-point differences, not relative percent changes. Metrics whose
+// denominator is zero are unavailable and cannot produce meaningful deltas.
+export function compareCoverage(current?: Coverage, baseline?: Coverage): CoverageChange | undefined {
+  if (!baseline) return undefined;
+  const diff = (metric: keyof Coverage) => {
+    const now = current?.[metric].percent;
+    const before = baseline[metric].percent;
+    if (now == null || before == null) return null;
+    const value = Math.round((now - before) * 100) / 100;
+    return value === 0 ? 0 : value;
+  };
+  return { lines: diff("lines"), functions: diff("functions"), branches: diff("branches") };
+}
+
 export type TestSummary = { total: number; passed: number; failed: number; skipped: number };
 export type Input = {
   ci: string;
   coverage?: Coverage;
+  baselineCoverage?: Coverage;
+  coverageChange?: CoverageChange;
   tests?: TestSummary;
   diagnostics?: string[];
 };
@@ -310,18 +331,28 @@ export function renderMarkdown(input: Input): string {
     ? `${input.tests.passed} passed · ${input.tests.failed} failed · ${input.tests.skipped} skipped / ${input.tests.total} total`
     : "Not reported";
   const diagnostics = [...new Set(input.diagnostics ?? [])].map(x => `- ${x}`);
+  const baseline = input.baselineCoverage;
+  const change = compareCoverage(input.coverage, baseline);
+  const delta = (value: number | null | undefined) =>
+    value == null ? "Not reported" : `${value >= 0 ? "+" : ""}${value.toFixed(2)} pp`;
+  const metric = (label: string, key: keyof Coverage) =>
+    baseline
+      ? `| ${label} | ${pct(input.coverage?.[key])} | ${pct(baseline[key])} | ${delta(change?.[key])} |`
+      : `| ${label} | ${pct(input.coverage?.[key])} |`;
+
   return [
     "<!-- benchmark-pr-quality-report -->",
     "## Benchmark · PR Quality Report",
     "",
     `**CI:** ${ciLabel[ci]} (${ci})`,
     "",
-    "| Metric | Result |",
-    "| --- | --- |",
-    `| Tests | ${tests} |`,
-    `| Line coverage | ${pct(input.coverage?.lines)} |`,
-    `| Function coverage | ${pct(input.coverage?.functions)} |`,
-    `| Branch coverage | ${pct(input.coverage?.branches)} |`,
+    baseline ? "| Metric | Result | Baseline | Change |" : "| Metric | Result |",
+    baseline ? "| --- | --- | --- | --- |" : "| --- | --- |",
+    baseline ? `| Tests | ${tests} | — | — |` : `| Tests | ${tests} |`,
+    metric("Line coverage", "lines"),
+    metric("Function coverage", "functions"),
+    metric("Branch coverage", "branches"),
+    ...(baseline ? ["", "_Coverage change is in percentage points (pp); file scopes must be comparable._"] : []),
     ...(diagnostics.length ? ["", "**Missing or invalid inputs**", ...diagnostics] : []),
     "",
     "_Informational only. Unavailable metrics are not treated as 0% or passing._",
