@@ -16,6 +16,37 @@ test("JUnit sums suites, errors count as failures", () => {
   const result = parseJunit('<testsuites><testsuite name="a" tests="4" failures="1" errors="1" skipped="1"></testsuite><testsuite tests="2" failures="0"/></testsuites>');
   assert.deepEqual(result, { total: 6, passed: 3, failed: 2, skipped: 1 });
 });
+test("JUnit avoids double counting hierarchical suite summaries", () => {
+  const xml = `<?xml version="1.0"?>
+    <testsuites tests="2" failures="1">
+      <testsuite name="parent" tests="2" failures="1">
+        <testsuite name="child" tests="2" failures="1">
+          <testcase classname="example" name="works"/>
+          <testcase classname="example" name="fails"><failure/></testcase>
+        </testsuite>
+      </testsuite>
+    </testsuites>`;
+  assert.deepEqual(parseJunit(xml), { total: 2, passed: 1, failed: 1, skipped: 0 });
+});
+test("JUnit sums sibling top-level suites without summing nested children", () => {
+  const xml = '<testsuites><testsuite tests="2" failures="1"><testsuite tests="2" failures="1"/></testsuite><testsuite tests="3" skipped="1"/></testsuites>';
+  assert.deepEqual(parseJunit(xml), { total: 5, passed: 3, failed: 1, skipped: 1 });
+});
+test("JUnit handles greater-than signs in quoted attributes and ignores comments and CDATA", () => {
+  const xml = `<testsuites>
+    <!-- <testsuite tests="999"/> -->
+    <testsuite name="value > threshold" tests="2" failures="1">
+      <testcase name='when x > y'><![CDATA[<testsuite tests="999"/>]]></testcase>
+    </testsuite>
+  </testsuites>`;
+  assert.deepEqual(parseJunit(xml), { total: 2, passed: 1, failed: 1, skipped: 0 });
+});
+test("JUnit rejects malformed/nested unsupported XML instead of fabricating totals", () => {
+  assert.throws(() => parseJunit('<testsuites><testsuite tests="2"></testsuites>'), /nesting/);
+  assert.throws(() => parseJunit('<testsuites><testsuite tests="2"/></testsuites><testsuite tests="3"/>'), /root/);
+  assert.throws(() => parseJunit('<!DOCTYPE testsuites><testsuites><testsuite tests="2"/></testsuites>'), /Unsupported XML/);
+  assert.throws(() => parseJunit('<testsuites><testsuite name="unbounded"><testsuite tests="2"/></testsuite></testsuites>'), /missing tests/);
+});
 test("Jest JSON reports counts without requiring test suite details", () => {
   assert.deepEqual(parseJest(JSON.stringify({ numTotalTests: 8, numFailedTests: 1, numPendingTests: 2 })), { total: 8, passed: 5, failed: 1, skipped: 2 });
 });
