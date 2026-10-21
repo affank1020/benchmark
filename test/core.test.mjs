@@ -48,6 +48,36 @@ test("JUnit rejects malformed/nested unsupported XML instead of fabricating tota
   assert.throws(() => parseJunit('<!DOCTYPE testsuites><testsuites><testsuite tests="2"/></testsuites>'), /Unsupported XML/);
   assert.throws(() => parseJunit('<testsuites><testsuite name="unbounded"><testsuite tests="2"/></testsuite></testsuites>'), /missing tests/);
 });
+test("Node.js 22 JUnit reporter root-level testcase format reports all outcomes", () => {
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
+    <testsuites>
+      <testcase name="passes" time="0.001" classname="test"/>
+      <testcase name="todo" classname="test"><skipped type="todo" message="pending"/></testcase>
+      <testcase name="fails" classname="test" failure="boom">
+        <failure type="testCodeFailure" message="boom">failure details</failure>
+      </testcase>
+      <!-- tests 3 -->
+      <!-- pass 1 -->
+      <!-- fail 1 -->
+      <!-- todo 1 -->
+    </testsuites>`;
+  assert.deepEqual(parseJunit(xml), { total: 3, passed: 1, failed: 1, skipped: 1 });
+});
+test("JUnit can report flat root testcases and independent suites without double counting", () => {
+  const xml = `<testsuites tests="3" failures="1" errors="0" skipped="0">
+    <testcase name="direct"><failure/></testcase>
+    <testsuite tests="2" failures="0" errors="0" skipped="0"/>
+  </testsuites>`;
+  assert.deepEqual(parseJunit(xml), { total: 3, passed: 2, failed: 1, skipped: 0 });
+});
+test("JUnit rejects root aggregate contradictions and invalid testcase nesting", () => {
+  assert.throws(() => parseJunit(
+    '<testsuites tests="2"><testcase name="one"/></testsuites>'
+  ), /root test counts disagree/);
+  assert.throws(() => parseJunit(
+    '<testsuites><wrapper><testcase/></wrapper></testsuites>'
+  ), /Invalid JUnit testcase nesting/);
+});
 test("JUnit derives missing suite failures from testcase outcomes", () => {
   const xml = '<testsuite tests="1"><testcase name="fails"><failure message="boom"/></testcase></testsuite>';
   assert.deepEqual(parseJunit(xml), { total: 1, passed: 0, failed: 1, skipped: 0 });
