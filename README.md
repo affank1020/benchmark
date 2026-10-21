@@ -58,6 +58,8 @@ To have the two files appear at artifact root, stage them there in CI or adapt t
 
 This repository installs its own [trusted reporting workflow](.github/workflows/benchmark-report.yml), matching the public [integration example](examples/report-pr.yml). Once the workflow is merged into the **default branch**, completed PR CI runs produce a single updatable Benchmark comment on their own pull requests. The underlying CI keeps publishing `benchmark-ci` artifacts even when tests fail, so failed runs can still be reported. Coverage remains **Not reported** until CI generates `lcov.info`.
 
+Fork-originated `workflow_run` events may omit pull-request associations, and GitHub's commit lookup can miss fork-only SHAs. The publisher therefore also discovers open PRs by source repository owner and branch, and only accepts one with matching repository ID, branch, and commit SHA. Ambiguous or stale matches are skipped rather than posting to the wrong PR. This fallback is covered by mocked GitHub API regression tests; a live fork PR still needs verification after deployment.
+
 The reporting workflow uses `workflow_run`, which GitHub only activates from the default branch. A change to the reporter workflow in a PR cannot validate its own publishing behaviour until merged; subsequent PRs exercise the end-to-end path. `test/workflow-contract.test.mjs` guards drift between the installed workflow and the example. For new repositories, follow the integration instructions below instead of copying the Benchmark-specific workflow without review.
 
 ## Security model
