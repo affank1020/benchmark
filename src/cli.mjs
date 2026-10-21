@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 import { writeFile } from "node:fs/promises";
 import { readBoundedText } from "./read-input.mjs";
-import { parseJest, parseJunit, parseLcov, renderMarkdown, normalizeCi } from "./core.ts";
+import { parseJest, parseJunit, parseLcov, renderMarkdown, normalizeCi, compareCoverage } from "./core.ts";
 
 const args = new Map();
 for (let i = 2; i < process.argv.length; i += 2) {
   if (!process.argv[i].startsWith("--") || !process.argv[i + 1]) {
-    console.error("Usage: cli.mjs [--coverage PATH] [--tests PATH] [--tests-format junit|jest] [--ci CONCLUSION] [--output PATH] [--json PATH]");
+    console.error("Usage: cli.mjs [--coverage PATH] [--baseline-coverage PATH] [--tests PATH] [--tests-format junit|jest] [--ci CONCLUSION] [--output PATH] [--json PATH]");
     process.exit(2);
   }
   args.set(process.argv[i].slice(2), process.argv[i + 1]);
@@ -25,6 +25,8 @@ async function optionalReport(flag, parser, failureMessage) {
   }
 }
 report.coverage = await optionalReport("coverage", parseLcov, "Coverage artifact missing or invalid");
+report.baselineCoverage = await optionalReport("baseline-coverage", parseLcov, "Baseline coverage artifact missing or invalid");
+report.coverageChange = compareCoverage(report.coverage, report.baselineCoverage);
 report.tests = await optionalReport("tests", args.get("tests-format") === "jest" ? parseJest : parseJunit, "Test artifact missing or invalid");
 report.diagnostics = diagnostics;
 const markdown = renderMarkdown(report);
