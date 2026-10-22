@@ -15,8 +15,8 @@ test("CI produces source-only LCOV and JUnit together on pushes and PRs", async 
   assert.match(ci, /on:\s*\n\s*push:\s*\n\s*branches: \[main, "atlas\/\*\*"\]\s*\n\s*pull_request:/);
   assert.match(ci, /node-version: "22"/);
   assert.match(ci, /--experimental-strip-types --experimental-test-coverage/);
-  assert.match(ci, /--test-coverage-include='src\/\*\.mjs'/);
-  assert.match(ci, /--test-coverage-include='src\/\*\.ts'/);
+  assert.match(ci, /--test-coverage-include='src\/\*\*\/\*\.mjs'/);
+  assert.match(ci, /--test-coverage-include='src\/\*\*\/\*\.ts'/);
   assert.match(ci, /--test-reporter=junit --test-reporter-destination=junit\.xml/);
   assert.match(ci, /--test-reporter=lcov --test-reporter-destination=lcov\.info/);
   assert.match(ci, /--coverage lcov\.info --ci failure --json benchmark-smoke\.json/);
@@ -41,8 +41,8 @@ test("Node 22 native dual reporters emit LCOV that Benchmark can parse", async (
     // catches incompatible native-reporter flags and output-format changes.
     const result = spawnSync(process.execPath, [
       "--experimental-strip-types", "--experimental-test-coverage",
-      "--test-coverage-include=src/*.mjs",
-      "--test-coverage-include=src/*.ts",
+      "--test-coverage-include=src/**/*.mjs",
+      "--test-coverage-include=src/**/*.ts",
       "--test", "--test-reporter=junit",
       "--test-reporter-destination=" + junit,
       "--test-reporter=lcov",

@@ -11,7 +11,9 @@ export function trackedSourceFiles(cwd = process.cwd()) {
   const output = execFileSync('git', ['ls-files', '-z', '--', 'src/'], {
     cwd, encoding: 'utf8', maxBuffer: MAX_LCOV_BYTES
   });
-  const files = output.split('\0').filter(path => /^src\/.+\.(?:mjs|ts)$/.test(path));
+  const files = output.split('\0').filter(path =>
+    /^src\/.+\.(?:mjs|ts)$/.test(path) && !path.endsWith('.d.ts')
+  );
   if (!files.length) throw new Error('No tracked JavaScript/TypeScript source files found');
   return files;
 }

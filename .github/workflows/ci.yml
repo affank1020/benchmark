@@ -22,8 +22,8 @@ jobs:
         id: tests
         run: |
           node --experimental-strip-types --experimental-test-coverage \
-            --test-coverage-include='src/*.mjs' \
-            --test-coverage-include='src/*.ts' \
+            --test-coverage-include='src/**/*.mjs' \
+            --test-coverage-include='src/**/*.ts' \
             --test --test-reporter=junit --test-reporter-destination=junit.xml \
             --test-reporter=lcov --test-reporter-destination=lcov.info \
             test/*.test.mjs
