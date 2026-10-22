@@ -37,7 +37,9 @@ test("reusable workflow preserves the trusted publisher's complete control flow"
       "artifacts.find(a => a.name === 'benchmark-ci' && !a.expired)",
       "artifacts.find(a => a.name === process.env.BENCHMARK_ARTIFACT_NAME && !a.expired)"
     )
-    .replace("name: benchmark-ci\n          path: artifacts", "name: ${{ inputs.artifact_name }}\n          path: artifacts");
+    .replace("name: benchmark-ci\n          path: artifacts", "name: ${{ inputs.artifact_name }}\n          path: artifacts")
+    .replace("BENCHMARK_ARTIFACT_NAME: benchmark-ci", "BENCHMARK_ARTIFACT_NAME: ${{ inputs.artifact_name }}")
+    .replace("name: benchmark-ci\n          path: baseline", "name: ${{ inputs.artifact_name }}\n          path: baseline");
   assert.equal(coreSection(reusable), expected,
     "Reusable and installed publishers should only differ in intentional input/pinning substitutions");
 });
