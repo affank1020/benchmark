@@ -191,7 +191,7 @@ test("installed and public full workflow remain synchronized; reusable variant u
     assert.match(workflow, /candidate\.event === 'push'/);
     assert.match(workflow, /candidate\.repository\?\.id === base\.repo\.id/);
     assert.match(workflow, /candidate\.workflow_id === run\.workflow_id/);
-    assert.match(workflow, /candidate\.conclusion/);
+    assert.match(workflow, /latest\.conclusion !== 'success'/);
     assert.match(workflow, /source\.size_in_bytes <= 25 \* 1024 \* 1024|artifact\.size_in_bytes <= 25 \* 1024 \* 1024/);
     assert.match(workflow, /ref: 81b6602198c38a74d6b539a484ff25b86c8e0cc8/);
     assert.match(workflow, /BENCHMARK_BASE_SHA:/);
