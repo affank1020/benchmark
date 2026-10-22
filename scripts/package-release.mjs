@@ -3,7 +3,8 @@
 // No network calls or dependency installation; this never creates a release.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { resolve, join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -79,14 +80,25 @@ const archive = "benchmark-cli-" + tag + ".tar.gz";
 const files = ["benchmark-report.yml", "benchmark-lifecycle.yml", archive];
 await writeFile(join(out, files[0]), releaseCaller, { flag: "wx" });
 await writeFile(join(out, files[1]), pinnedLifecycle, { flag: "wx" });
-// git archive always reads the verified commit, not the working directory.
-// Package only the dependency-free CLI runtime (not CI workflows or tests).
-execFileSync("git", [
-  "archive", "--format=tar.gz", "--prefix=benchmark-" + tag + "/",
-  "--output=" + join(out, archive), sha,
-  "LICENSE", "README.md", "package.json",
-  "src/cli.mjs", "src/core.ts", "src/read-input.mjs", "src/publish-policy.mjs"
-], { cwd: root, stdio: "pipe" });
+// Use a CLI-specific README from the reviewed commit, not the source
+// README, which refers to docs and tests not shipped in the archive.
+// git archive --add-file joins the prefix with the added file basename.
+const staging = await mkdtemp(join(tmpdir(), "benchmark-cli-readme-"));
+try {
+  const archivedReadme = git("show", sha + ":docs/cli-archive.md") + "\n";
+  const readmeFile = join(staging, "README.md");
+  await writeFile(readmeFile, archivedReadme, { flag: "wx" });
+  // Every shipped byte originates from the same reviewed Git commit.
+  execFileSync("git", [
+    "archive", "--format=tar.gz", "--prefix=benchmark-" + tag + "/",
+    "--add-file=" + readmeFile,
+    "--output=" + join(out, archive), sha,
+    "LICENSE", "package.json",
+    "src/cli.mjs", "src/core.ts", "src/read-input.mjs", "src/publish-policy.mjs"
+  ], { cwd: root, stdio: "pipe" });
+} finally {
+  await rm(staging, { recursive: true, force: true });
+}
 
 const digest = async file => {
   const bytes = await readFile(join(out, file));

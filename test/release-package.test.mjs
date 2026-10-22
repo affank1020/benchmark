@@ -65,6 +65,19 @@ test("release packaging emits SHA-pinned consumers, an exact CLI archive, manife
       "LICENSE", "README.md", "package.json", "src/cli.mjs", "src/core.ts",
       "src/read-input.mjs", "src/publish-policy.mjs"
     ]) assert.ok(entries.includes("benchmark-v0.1.0/" + file), file);
+    // Check the extracted CLI README, not just the archive filename list.
+    const packagedReadme = execFileSync("tar", [
+      "-xOzf", join(out, "benchmark-cli-v0.1.0.tar.gz"),
+      "benchmark-v0.1.0/README.md"
+    ], { encoding: "utf8" });
+    const canonicalReadme = await readFile(new URL("../docs/cli-archive.md", import.meta.url), "utf8");
+    assert.equal(packagedReadme, canonicalReadme,
+      "CLI README must come from the reviewed source commit");
+    assert.match(packagedReadme, /# Benchmark CLI/);
+    assert.match(packagedReadme, /node --experimental-strip-types src\/cli\.mjs/);
+    assert.match(packagedReadme, /https:\/\/github\.com\/affank1020\/benchmark\/tree\/main\/examples/);
+    assert.doesNotMatch(packagedReadme, /npm test|]\((?:\.?\/)?(?:docs|examples|test)\//);
+    assert.ok(!entries.includes("benchmark-v0.1.0/docs/cli-archive.md"));
     assert.ok(entries.every(e => e.startsWith("benchmark-v0.1.0/")));
     assert.ok(!entries.some(e => e.includes("/test/") ||
       e.includes("/.github/") || e.includes("node_modules")));

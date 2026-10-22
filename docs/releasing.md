@@ -12,7 +12,7 @@ This project publishes **GitHub Releases**, not npm packages. The CLI remains de
 
 ## Output files
 
-- `benchmark-cli-vX.Y.Z.tar.gz`: only the CLI runtime (`src/`, package metadata, README, LICENSE); requires Node.js >=22.6.
+- `benchmark-cli-vX.Y.Z.tar.gz`: only the CLI runtime (`src/`, package metadata, LICENSE) and a CLI-specific `README.md` with online documentation links; requires Node.js >=22.6. Developer tests, repository workflows and local docs are excluded.
 - `benchmark-report.yml`: completed-CI consumer `workflow_run` caller, pinned to this release's exact commit, with combined artifact mode by default and optional split input names.
 - `benchmark-lifecycle.yml`: trusted CI-start handler, with its trusted policy checkout pinned to this release's exact commit.
 - `release-manifest.json`: machine-readable release version, commit SHA and SHA256/byte metadata.
