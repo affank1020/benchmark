@@ -96,7 +96,8 @@ async function choose({ pull = pr, candidates = [exact], artifacts = [artifact],
 test("selects the exact successful base-branch push run and bounded artifact", async () => {
   const result = await choose();
   assert.deepEqual(result.outputs, {
-    present: "true", run_id: "999", base_sha: "base-sha", base_ref: "main"
+    present: "true", run_id: "999", run_attempt: "1",
+    artifact_id: "400", base_sha: "base-sha", base_ref: "main"
   });
   const query = result.requests.find(r => r.api === "listWorkflowRuns").args;
   assert.equal(query.head_sha, "base-sha");
@@ -161,15 +162,45 @@ test("expired or oversized artifact fails closed and custom artifact names match
   assert.equal(customized.outputs.run_id, "999");
 });
 
+test("duplicate same-name artifacts fail closed even if one is within size limits", async () => {
+  const { outputs } = await choose({ artifacts: [
+    artifact,
+    { ...artifact, id: 401, size_in_bytes: 26 * 1024 * 1024 }
+  ] });
+  assert.deepEqual(outputs, {});
+  const expired = await choose({ artifacts: [
+    artifact,
+    { ...artifact, id: 402, expired: true }
+  ] });
+  assert.deepEqual(expired.outputs, {});
+});
+
+test("validated artifact ID is returned exactly, never selected again by name", async () => {
+  const candidate = { ...artifact, id: 777, size_in_bytes: 2048 };
+  const { outputs } = await choose({ artifacts: [candidate] });
+  assert.equal(outputs.artifact_id, "777");
+  assert.equal(outputs.run_id, "999");
+  assert.equal(outputs.run_attempt, "1");
+  assert.deepEqual((await choose({ artifacts: [{ ...candidate, id: null }] })).outputs, {});
+});
+
 test("publisher only passes a downloaded baseline and rechecks its base SHA at publication", async () => {
   const installed = await load("../.github/workflows/benchmark-report.yml");
   assert.match(installed, /if: steps\.baseline\.outputs\.present == 'true'/);
   assert.match(installed, /run-id: \$\{\{ steps\.baseline\.outputs\.run_id \}\}/);
+  assert.match(installed, /artifact-ids: \$\{\{ steps\.baseline\.outputs\.artifact_id \}\}/);
+  const downloaded = installed.slice(
+    installed.indexOf("- name: Download exact base CI artifact"),
+    installed.indexOf("- name: Generate quality report")
+  );
+  assert.doesNotMatch(downloaded, /\n\s*name: benchmark-ci/);
   assert.match(installed, /path: baseline/);
   assert.match(installed, /if \[ -f baseline\/lcov\.info \]; then[\s\S]*?baseline_args=\(--baseline-coverage baseline\/lcov\.info\)/);
   assert.match(installed, /"\$\{baseline_args\[@\]\}"/);
   assert.match(installed, /BENCHMARK_BASE_SHA: \$\{\{ steps\.baseline\.outputs\.base_sha \}\}/);
   assert.match(installed, /BENCHMARK_BASE_REF: \$\{\{ steps\.baseline\.outputs\.base_ref \}\}/);
+  assert.match(installed, /BENCHMARK_BASE_RUN_ID: \$\{\{ steps\.baseline\.outputs\.run_id \}\}/);
+  assert.match(installed, /BENCHMARK_BASE_RUN_ATTEMPT: \$\{\{ steps\.baseline\.outputs\.run_attempt \}\}/);
   assert.match(installed, /current\.base\?\.ref !== process\.env\.BENCHMARK_BASE_REF/);
   assert.match(installed, /current\.base\?\.sha !== process\.env\.BENCHMARK_BASE_SHA/);
   assert.doesNotMatch(installed, /checkout[\s\S]{0,100}ref: \$\{\{/);
