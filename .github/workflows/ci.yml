@@ -16,18 +16,31 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Run unit tests
-        run: node --experimental-strip-types --test --test-reporter=junit test/*.test.mjs > junit.xml
-      - name: Smoke-test actual Node.js JUnit output
+      # One test execution produces both of Benchmark's supported input formats.
+      # Restrict the LCOV file to the reporter implementation, not test files.
+      - name: Run unit tests with coverage
+        id: tests
+        run: |
+          node --experimental-strip-types --experimental-test-coverage \
+            --test-coverage-include='src/*.mjs' \
+            --test-coverage-include='src/*.ts' \
+            --test --test-reporter=junit --test-reporter-destination=junit.xml \
+            --test-reporter=lcov --test-reporter-destination=lcov.info \
+            test/*.test.mjs
+      - name: Smoke-test actual Node.js JUnit and LCOV output
         if: always()
+        env:
+          TEST_OUTCOME: ${{ steps.tests.outcome }}
         run: |
           test -s junit.xml
-          node --experimental-strip-types src/cli.mjs --tests junit.xml --ci failure --json benchmark-smoke.json > benchmark-smoke.md
-          node -e 'const fs = require("node:fs"); const report = JSON.parse(fs.readFileSync("benchmark-smoke.json", "utf8")); if (!report.tests || report.tests.total < 1) { console.error("Benchmark could not parse its CI JUnit artifact"); process.exit(1); }'
+          node --experimental-strip-types src/cli.mjs --tests junit.xml --coverage lcov.info --ci failure --json benchmark-smoke.json > benchmark-smoke.md
+          node -e 'const fs = require("node:fs"); const report = JSON.parse(fs.readFileSync("benchmark-smoke.json", "utf8")); if (!report.tests || report.tests.total < 1) { console.error("Benchmark could not parse its CI JUnit artifact"); process.exit(1); } if (process.env.TEST_OUTCOME === "success" && (!report.coverage || report.coverage.lines.found < 1 || report.coverage.functions.found < 1)) { console.error("Successful CI did not generate parseable source LCOV coverage"); process.exit(1); }'
       - name: Upload Benchmark inputs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: benchmark-ci
-          path: junit.xml
+          path: |
+            junit.xml
+            lcov.info
           if-no-files-found: ignore
