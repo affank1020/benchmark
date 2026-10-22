@@ -78,3 +78,55 @@ test("invalid baseline stays unavailable and never fabricates a change", () => {
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("malformed existing baseline is unavailable, not a fabricated coverage gain", () => {
+  const cli = fileURLToPath(new URL("../src/cli.mjs", import.meta.url));
+  const directory = mkdtempSync(join(tmpdir(), "benchmark-bad-baseline-"));
+  try {
+    const current = join(directory, "current.info");
+    const baseline = join(directory, "baseline.info");
+    const json = join(directory, "report.json");
+    writeFileSync(current, "LF:10\nLH:7\nend_of_record");
+    writeFileSync(baseline, "LF:10\nLH:invalid\nend_of_record");
+    const run = spawnSync(process.execPath, [
+      "--experimental-strip-types", cli, "--coverage", current,
+      "--baseline-coverage", baseline, "--json", json
+    ], { encoding: "utf8", timeout: 15000 });
+    assert.equal(run.status, 0, run.stderr);
+    const data = JSON.parse(readFileSync(json, "utf8"));
+    assert.equal(data.coverage.lines.percent, 70);
+    assert.equal(data.baselineCoverage, undefined);
+    assert.equal(data.coverageChange, undefined);
+    assert.deepEqual(data.diagnostics, ["Baseline coverage artifact missing or invalid"]);
+    assert.match(run.stdout, /Baseline coverage artifact missing or invalid/);
+    assert.doesNotMatch(run.stdout, /\+70\.00 pp|\| Baseline \| Change \|/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("malformed existing current coverage cannot produce a misleading baseline change", () => {
+  const cli = fileURLToPath(new URL("../src/cli.mjs", import.meta.url));
+  const directory = mkdtempSync(join(tmpdir(), "benchmark-bad-current-"));
+  try {
+    const current = join(directory, "current.info");
+    const baseline = join(directory, "baseline.info");
+    const json = join(directory, "report.json");
+    writeFileSync(current, "LF:10\nLH:invalid\nend_of_record");
+    writeFileSync(baseline, "LF:10\nLH:5\nend_of_record");
+    const run = spawnSync(process.execPath, [
+      "--experimental-strip-types", cli, "--coverage", current,
+      "--baseline-coverage", baseline, "--json", json
+    ], { encoding: "utf8", timeout: 15000 });
+    assert.equal(run.status, 0, run.stderr);
+    const data = JSON.parse(readFileSync(json, "utf8"));
+    assert.equal(data.coverage, undefined);
+    assert.deepEqual(data.coverageChange, {
+      lines: null, functions: null, branches: null
+    });
+    assert.deepEqual(data.diagnostics, ["Coverage artifact missing or invalid"]);
+    assert.match(run.stdout, /\| Line coverage \| Not reported \| 50\.00% \| Not reported \|/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
