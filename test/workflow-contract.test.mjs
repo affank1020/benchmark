@@ -81,3 +81,52 @@ test("early lifecycle uses trusted CI-start workflow_run instead of pull_request
   assert.match(publisher, /Replace stuck processing status on failure/);
   assert.match(publisher, /benchmark-state:ready/);
 });
+
+
+test("CI-start events cannot evict a pending completed publisher from the shared queue", async () => {
+  const workflowPaths = [
+    "../.github/workflows/benchmark-lifecycle.yml",
+    "../examples/lifecycle-pr.yml",
+    "../.github/workflows/benchmark-report.yml",
+    "../examples/report-pr.yml",
+    "../.github/workflows/reusable-report.yml"
+  ];
+  const sources = await Promise.all(workflowPaths.map(source));
+  const blocks = sources.map(workflow => {
+    const found = /^concurrency:\n(?<block>(?:^  .*\n)+)/m.exec(workflow);
+    assert.ok(found, "Workflow must define a concurrency block");
+    const lines = found.groups.block.split("\n").filter(Boolean);
+    const get = key => lines.find(line => line.trimStart().startsWith(key + ":"))
+      ?.trim().slice(key.length + 1).trim();
+    return {
+      group: get("group"),
+      queue: get("queue") ?? "single",
+      cancelInProgress: get("cancel-in-progress")
+    };
+  });
+  for (const [i, block] of blocks.entries()) {
+    assert.equal(block.group, blocks[0].group,
+      workflowPaths[i] + " must share the same writer group");
+    assert.equal(block.queue, "max",
+      workflowPaths[i] + " must preserve multiple pending writers");
+    assert.equal(block.cancelInProgress, "false",
+      workflowPaths[i] + " must not cancel running publishers");
+  }
+
+  // GitHub's documented default queue:single cancels/replaces an already
+  // pending workflow even when cancel-in-progress:false. Model the exact
+  // regression: an older active publisher, a pending completed reporter,
+  // followed by a delayed in_progress lifecycle webhook.
+  const enqueue = (pending, incoming, queueMode) =>
+    queueMode === "single" ? [incoming] : [...pending, incoming];
+  const completed = "current CI completed quality report";
+  const lateEarly = "delayed CI in_progress waiting status";
+  const pending = [completed];
+  assert.deepEqual(enqueue(pending, lateEarly, "single"), [lateEarly],
+    "default concurrency would silently evict the final reporter");
+  for (const block of blocks) {
+    assert.deepEqual(enqueue(pending, lateEarly, block.queue),
+      [completed, lateEarly],
+      "queue:max must keep the completed report pending ahead of the late event");
+  }
+});
