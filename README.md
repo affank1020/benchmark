@@ -5,7 +5,7 @@
 ## First milestone
 
 The current MVP provides:
-- LCOV line, function and branch coverage parsing.
+- LCOV line, function and branch coverage parsing, with optional comparisons against a supplied LCOV baseline.
 - JUnit XML and Jest JSON test-summary parsing (Jest TODO cases count as skipped, not passed).
 - CI conclusion reporting, including failed, cancelled and timed-out runs.
 - Deterministic Markdown output, JSON output and explicit unavailable metrics.
@@ -23,6 +23,21 @@ node --experimental-strip-types src/cli.mjs \
   --output benchmark.md \
   --json benchmark.json
 ```
+
+## Coverage comparison (manual baseline)
+
+Use `--baseline-coverage PATH` to compare current LCOV metrics against an explicitly supplied baseline LCOV file. This first step **does not automatically locate a base-branch report**.
+
+```bash
+node --experimental-strip-types src/cli.mjs \
+  --coverage ./coverage/current/lcov.info \
+  --baseline-coverage ./coverage/base/lcov.info \
+  --ci success --json benchmark.json
+```
+
+The Markdown report adds a baseline and change column. Change means **percentage points**, so a shift from 60% to 55% is **-5.00 pp**, not a 5% relative decline. The JSON includes `baselineCoverage` and a per-metric `coverageChange` object, whose values are percentage-point numbers or `null` if either denominator is unavailable. Zero measured lines/functions/branches must not be mistaken for 0% coverage.
+
+The two input files must represent comparable source/file scopes and instrumentation for the difference to be meaningful. A missing, malformed or oversized baseline is reported as unavailable without changing the normal current coverage results. LCOV records with malformed, duplicated or incomplete summary counter pairs (for example `LF` without `LH`) are rejected instead of being zero-filled; this applies to current coverage too. Percentage-point differences are calculated from the original hit/found ratios and rounded once, so the displayed change may differ by 0.01 pp from subtracting the two separately rounded displayed rates. Both files are subject to the existing bounded-read limits. This option only affects local/report CLI output for now; the currently pinned GitHub Actions publisher remains on the previously reviewed version until intentionally upgraded.
 
 For Jest JSON summaries, add `--tests-format jest`. Paths may be omitted. Missing or unparseable files are reported as unavailable rather than falsely passing. Exit code zero means a report was rendered; it **does not indicate CI passed**.
 
@@ -73,11 +88,11 @@ jobs:
 
 The consumer's own CI must upload an artifact named `benchmark-ci` (or the chosen `artifact_name`) containing `lcov.info` and `junit.xml` at its root. It should upload on failure (`if: always()`); missing inputs are represented as unavailable, never fabricated. The reusable workflow runs in the **consumer repository's** security context, not on PR-supplied code. No external installation or personal access token is required when the repository and workflow permissions allow reusable calls.
 
-**Publication currently blocked pending end-to-end authorization verification.** The installed reporter on `main` processed PR #3's CI successfully but GitHub returned HTTP 403 when creating the PR comment ([failed publisher run](https://github.com/affank1020/benchmark/actions/runs/39680413383)), even though the job displayed `Issues: write`. A documented GitHub App permissions issue suggests also granting `pull-requests: write`; this PR grants it to the installed, example and reusable workflows. This change cannot be validated by the default-branch `workflow_run` publisher until it is merged. Do not treat the reusable integration as production-ready until a real comment is successfully created/updated and a separate consumer/fork has been tested.
+**Same-repository report publication verified.** After the PR #3 permissions fix reached `main`, the installed `workflow_run` reporter processed PR #4's [successful CI run](https://github.com/affank1020/benchmark/actions/runs/39696508670) and [created a quality report comment as `github-actions[bot]`](https://github.com/affank1020/benchmark/pull/4#issuecomment-6329226920). This resolves the previously observed HTTP 403 for the same-repository workflow. Automatic report **updates** and execution from a separate consumer repository and a fork PR still require end-to-end verification before production adoption.
 
 ## Benchmark reporting on Benchmark
 
-This repository installs its own [trusted reporting workflow](.github/workflows/benchmark-report.yml), matching the public [integration example](examples/report-pr.yml). Both check out the same immutable, reviewed Benchmark implementation SHA; an upgrade requires changing the pins explicitly and reviewing the new implementation. Once the workflow is on the **default branch** and GitHub authorizes the write token, completed PR CI runs should produce a single updatable Benchmark comment on their own pull requests. The underlying CI keeps publishing `benchmark-ci` artifacts even when tests fail, so failed runs can still be reported. Coverage remains **Not reported** until CI generates `lcov.info`.
+This repository installs its own [trusted reporting workflow](.github/workflows/benchmark-report.yml), matching the public [integration example](examples/report-pr.yml). Both check out the same immutable, reviewed Benchmark implementation SHA; an upgrade requires changing the pins explicitly and reviewing the new implementation. The workflow is on `main` and has successfully published a same-repository PR comment. The underlying CI keeps publishing `benchmark-ci` artifacts even when tests fail, so failed runs can still be reported. Coverage remains **Not reported** until CI generates `lcov.info`.
 
 Fork-originated `workflow_run` events may omit pull-request associations, and GitHub's commit lookup can miss fork-only SHAs. The publisher therefore also discovers open PRs by source repository owner and branch, and only accepts one with matching repository ID, branch, and commit SHA. Ambiguous or stale matches are skipped rather than posting to the wrong PR. This fallback is covered by mocked GitHub API regression tests; a live fork PR still needs verification after deployment.
 
