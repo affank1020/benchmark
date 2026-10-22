@@ -96,11 +96,12 @@ jobs:
             }
             const marker = '<!-- benchmark-pr-quality-report -->';
             const metadata = '<!-- benchmark-head-sha:' + current.head.sha + ' -->';
+            const runMarker = '<!-- benchmark-ci-run:' + run.id + ':' + run.run_attempt + ' -->';
             const comments = await github.paginate(github.rest.issues.listComments, {
               owner, repo, issue_number, per_page: 100
             });
             const previous = policy.findOwnedReportComment(comments, marker);
-            const body = [marker, metadata, '<!-- benchmark-state:processing -->',
+            const body = [marker, metadata, runMarker, '<!-- benchmark-state:processing -->',
               '## Benchmark · Preparing PR Quality Report',
               '🔄 **Processing CI results**',
               'CI has finished. Benchmark is retrieving test and coverage results and preparing the report.',
@@ -376,7 +377,7 @@ jobs:
             });
             const previous = policy.findOwnedReportComment(comments, marker);
             const ready = body.replace(marker,
-              marker + '\n<!-- benchmark-head-sha:' + current.head.sha + ' -->\n<!-- benchmark-state:ready -->');
+              marker + '\n<!-- benchmark-head-sha:' + current.head.sha + ' -->\n<!-- benchmark-ci-run:' + run.id + ':' + run.run_attempt + ' -->\n<!-- benchmark-state:ready -->');
             if (ready.length > 20000) throw new Error('Benchmark report with metadata is too large');
             if (previous) {
               await github.rest.issues.updateComment({ owner, repo, comment_id: previous.id, body: ready });
@@ -426,11 +427,12 @@ jobs:
             }
             const marker = '<!-- benchmark-pr-quality-report -->';
             const metadata = '<!-- benchmark-head-sha:' + current.head.sha + ' -->';
+            const runMarker = '<!-- benchmark-ci-run:' + run.id + ':' + run.run_attempt + ' -->';
             const comments = await github.paginate(github.rest.issues.listComments, {
               owner, repo, issue_number, per_page: 100
             });
             const previous = policy.findOwnedReportComment(comments, marker);
-            const body = [marker, metadata, '<!-- benchmark-state:error -->',
+            const body = [marker, metadata, runMarker, '<!-- benchmark-state:error -->',
               '## Benchmark · Report unavailable',
               '⚠️ **Benchmark could not finish processing this CI run.**',
               'Check the reporting workflow logs. The next CI run will retry on this same comment.',
@@ -441,3 +443,84 @@ jobs:
             } else {
               await github.rest.issues.createComment({ owner, repo, issue_number, body });
             }
+      - name: Reconcile skipped or interrupted processing status
+        if: ${{ always() && steps.pr.outputs.number != '' }}
+        uses: actions/github-script@v7
+        env:
+          BENCHMARK_PR_NUMBER: ${{ steps.pr.outputs.number }}
+          BENCHMARK_BASE_SHA: ${{ steps.baseline.outputs.base_sha }}
+          BENCHMARK_BASE_REF: ${{ steps.baseline.outputs.base_ref }}
+        with:
+          script: |
+            const { pathToFileURL } = require('url');
+            const policy = await import(pathToFileURL(
+              process.env.GITHUB_WORKSPACE + '/benchmark/src/publish-policy.mjs'
+            ).href);
+            const { owner, repo } = context.repo;
+            const run = context.payload.workflow_run;
+            const issue_number = Number(process.env.BENCHMARK_PR_NUMBER);
+            if (!Number.isSafeInteger(issue_number) || issue_number < 1) throw new Error('Invalid PR number');
+            const { data: current } = await github.rest.pulls.get({
+              owner, repo, pull_number: issue_number
+            });
+            // Do not touch a different/closed PR, a new head or a different fork.
+            if (current.base?.repo?.full_name !== owner + '/' + repo ||
+                !policy.matchesRunToPr(run, current)) {
+              core.notice('PR changed or closed; leaving any newer status untouched.');
+              return;
+            }
+            const { data: liveRun } = await github.rest.actions.getWorkflowRun({
+              owner, repo, run_id: run.id
+            });
+            if (liveRun.id !== run.id || liveRun.workflow_id !== run.workflow_id ||
+                liveRun.event !== 'pull_request' || liveRun.head_sha !== run.head_sha ||
+                liveRun.head_branch !== run.head_branch) {
+              core.warning('CI run identity changed; cannot reconcile comment.');
+              return;
+            }
+            const marker = '<!-- benchmark-pr-quality-report -->';
+            const headMarker = '<!-- benchmark-head-sha:' + current.head.sha + ' -->';
+            const runMarker = '<!-- benchmark-ci-run:' + run.id + ':' + run.run_attempt + ' -->';
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number, per_page: 100
+            });
+            const previous = policy.findOwnedReportComment(comments, marker);
+            // Only the processing state written by THIS run is eligible. A newer
+            // run's state, a newly opened head, or a finished report must never be reset.
+            if (!previous || !previous.body.includes(headMarker) ||
+                !previous.body.includes(runMarker) ||
+                !previous.body.includes('<!-- benchmark-state:processing -->')) {
+              core.notice('No unfinished processing comment belonging to this CI attempt.');
+              return;
+            }
+            const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+              owner, repo, workflow_id: run.workflow_id,
+              head_sha: run.head_sha, event: 'pull_request', per_page: 100
+            });
+            const newer = runs.some(candidate =>
+              candidate.workflow_id === run.workflow_id &&
+              candidate.head_sha === run.head_sha &&
+              candidate.event === 'pull_request' &&
+              (candidate.run_number > run.run_number ||
+                (candidate.run_number === run.run_number &&
+                  candidate.run_attempt > run.run_attempt))
+            );
+            const baseChanged = Boolean(process.env.BENCHMARK_BASE_SHA && (
+              current.base?.sha !== process.env.BENCHMARK_BASE_SHA ||
+              current.base?.ref !== process.env.BENCHMARK_BASE_REF
+            ));
+            const explanation = baseChanged
+              ? 'The PR base changed while this report was being prepared. Rerun CI against the current base to get a valid comparison.'
+              : newer
+                ? 'This CI result was superseded by a newer attempt. Benchmark will publish the newer result after its CI finishes.'
+                : 'This CI attempt ended without a publishable report. Check the workflow logs, then rerun CI to retry.';
+            const body = [
+              marker, headMarker, runMarker, '<!-- benchmark-state:unavailable -->',
+              '## Benchmark · Report not published',
+              '⚠️ **The previous processing step has finished without a current report.**',
+              explanation,
+              '[View CI run](https://github.com/' + owner + '/' + repo + '/actions/runs/' + run.id + ')'
+            ].join('\n\n');
+            await github.rest.issues.updateComment({
+              owner, repo, comment_id: previous.id, body
+            });

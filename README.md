@@ -110,6 +110,8 @@ The single comment moves through **Waiting for CI → Processing CI results → 
 
 For a **new consumer**, copy `examples/lifecycle-pr.yml` to `.github/workflows/benchmark-lifecycle.yml` on the default branch. Also deploy a **reviewed release** of the enhanced `reusable-report.yml` (or full reporter) pinned to its immutable 40-character SHA; an older reusable caller such as the PR #6 release continues to publish final reports but does not expose intermediate processing/error states. Both workflows must run under the same repository's Actions identity for a single editable comment. Only the lifecycle's trusted PR-event workflow needs `issues: write`; the existing PR CI remains `contents: read` only. Do not introduce `actions/checkout` of fork code, `pull_request_target` shell execution, or a moving privileged ref.
 
+The trusted publisher runs a final **always-running reconciliation** after report publication and failure handling: if an earlier freshness guard exits successfully without replacing its own `Processing` status (for example because the PR base changes), it replaces that particular run's processing comment with **Report not published** and an actionable explanation. A private CI-run-ID/attempt marker ensures the reconciliation cannot overwrite a newer run's processing, error, or completed report. A changed or closed PR head is never modified. GitHub API failures and job cancellation can still prevent a status transition.
+
 The lifecycle is inactive on this PR until its workflow reaches `main`, because GitHub only runs trusted `pull_request_target` and `workflow_run` workflows from the base repository's default branch. Verify the waiting and final in-place update on a subsequent PR, including a fork and a failed CI run.
 
 ## Security model

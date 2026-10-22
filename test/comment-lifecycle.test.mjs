@@ -6,7 +6,7 @@ import { matchesRunToPr, isLatestCompletedRun, findOwnedReportComment } from "..
 const load = path => readFile(new URL(path, import.meta.url), "utf8");
 const marker = "<!-- benchmark-pr-quality-report -->";
 const sha = "a".repeat(40);
-const fork = { number: 41, state: "open", head: { sha, ref: "feature", repo: { id: 501 } }, base: { repo: { id: 500, full_name: "org/consumer" } } };
+const fork = { number: 41, state: "open", head: { sha, ref: "feature", repo: { id: 501 } }, base: { sha: "base-sha", ref: "main", repo: { id: 500, full_name: "org/consumer" } } };
 const run = { id: 12, workflow_id: 23, run_number: 8, run_attempt: 1, event: "pull_request", status: "completed", head_sha: sha, head_branch: "feature", head_repository: { id: 501 } };
 
 function extractScript(workflow, stepName) {
@@ -33,6 +33,13 @@ async function runStep({ file = "../.github/workflows/benchmark-lifecycle.yml",
     "const policy = await import(pathToFileURL(\n" +
     "  process.env.GITHUB_WORKSPACE + '/benchmark/src/publish-policy.mjs'\n" +
     ").href);\n", "");
+  if (step === "Update one PR comment if still current") {
+    code = code.replace("const { readFileSync } = require('fs');\n", "");
+    code = code.replace(
+      "const body = readFileSync('benchmark-report.md', 'utf8');",
+      "const body = process.env.TEST_REPORT;"
+    );
+  }
   const writes = [], warnings = [];
   const data = {
     repo: { owner: "org", repo: "consumer" },
@@ -56,7 +63,14 @@ async function runStep({ file = "../.github/workflows/benchmark-lifecycle.yml",
   const AsyncFunction = Object.getPrototypeOf(async function() {}).constructor;
   await new AsyncFunction("github", "context", "core", "process", "policy", code)(
     github, data, { warning: x => warnings.push(x), notice: x => warnings.push(x) },
-    { env: { BENCHMARK_PR_NUMBER: "41" } },
+    { env: {
+      BENCHMARK_PR_NUMBER: "41",
+      BENCHMARK_BASE_SHA: "base-sha",
+      BENCHMARK_BASE_REF: "main",
+      BENCHMARK_BASE_RUN_ID: "999",
+      BENCHMARK_BASE_RUN_ATTEMPT: "1",
+      TEST_REPORT: marker + "\n## Quality Report"
+    } },
     { matchesRunToPr, isLatestCompletedRun, findOwnedReportComment }
   );
   return { writes, warnings };
@@ -153,4 +167,96 @@ test("every publisher uses exactly the same trusted transition code", async () =
     assert.equal(scripts[0], scripts[1]);
     assert.equal(scripts[0], scripts[2]);
   }
+});
+
+
+test("processing → changed base → successful publication skip → reconciliation removes stuck processing", async () => {
+  const file = "../.github/workflows/benchmark-report.yml";
+  const processing = await runStep({
+    file, step: "Publish processing status on the same PR comment"
+  });
+  assert.equal(processing.writes.length, 1);
+  const prior = { id: 77, user: { login: "github-actions[bot]" },
+    body: processing.writes[0].body };
+  assert.match(prior.body, /benchmark-state:processing/);
+  assert.match(prior.body, /benchmark-ci-run:12:1/);
+  const moved = { ...fork, base: { ...fork.base, sha: "changed-base" } };
+  const published = await runStep({
+    file, step: "Update one PR comment if still current",
+    current: moved, comments: [prior]
+  });
+  assert.deepEqual(published.writes, [], "stale baseline must not publish any coverage");
+  assert.ok(published.warnings.some(w => /base commit or branch changed/.test(w)));
+
+  const reconciled = await runStep({
+    file, step: "Reconcile skipped or interrupted processing status",
+    current: moved, comments: [prior]
+  });
+  assert.equal(reconciled.writes.length, 1);
+  assert.equal(reconciled.writes[0].kind, "update");
+  assert.equal(reconciled.writes[0].comment_id, 77);
+  assert.match(reconciled.writes[0].body, /benchmark-state:unavailable/);
+  assert.match(reconciled.writes[0].body, /PR base changed/);
+  assert.doesNotMatch(reconciled.writes[0].body, /benchmark-state:processing/);
+});
+
+test("finalizer never overwrites a newer head, run, or final state", async () => {
+  const file = "../.github/workflows/benchmark-report.yml";
+  const oldBody = marker + "\n<!-- benchmark-head-sha:" + sha +
+    " -->\n<!-- benchmark-ci-run:12:1 -->\n<!-- benchmark-state:processing -->";
+  const cases = [
+    { current: { ...fork, head: { ...fork.head, sha: "b".repeat(40) } } },
+    { current: { ...fork, state: "closed" } },
+    { comments: [{ id: 77, user: { login: "github-actions[bot]" },
+      body: oldBody.replace("12:1", "14:1") }] },
+    { comments: [{ id: 77, user: { login: "github-actions[bot]" },
+      body: oldBody.replace("processing", "ready") }] },
+    { comments: [{ id: 77, user: { login: "another[bot]" }, body: oldBody }] }
+  ];
+  for (const options of cases) {
+    const result = await runStep({
+      file, step: "Reconcile skipped or interrupted processing status",
+      comments: [{ id: 77, user: { login: "github-actions[bot]" }, body: oldBody }],
+      ...options
+    });
+    assert.equal(result.writes.length, 0, JSON.stringify(options));
+  }
+});
+
+test("a superseded CI attempt becomes awaiting rather than permanently processing", async () => {
+  const old = { id: 77, user: { login: "github-actions[bot]" },
+    body: marker + "\n<!-- benchmark-head-sha:" + sha +
+      " -->\n<!-- benchmark-ci-run:12:1 -->\n<!-- benchmark-state:processing -->" };
+  const newer = { ...run, id: 15, run_number: 9, status: "in_progress" };
+  const { writes } = await runStep({
+    file: "../.github/workflows/reusable-report.yml",
+    step: "Reconcile skipped or interrupted processing status",
+    comments: [old], candidates: [run, newer]
+  });
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].kind, "update");
+  assert.equal(writes[0].comment_id, 77);
+  assert.match(writes[0].body, /superseded by a newer attempt/);
+  assert.match(writes[0].body, /benchmark-state:unavailable/);
+});
+
+test("reconciliation is unconditional after publication and identical across publishers", async () => {
+  const files = await Promise.all([
+    load("../.github/workflows/benchmark-report.yml"),
+    load("../examples/report-pr.yml"),
+    load("../.github/workflows/reusable-report.yml")
+  ]);
+  for (const workflow of files) {
+    const label = "Reconcile skipped or interrupted processing status";
+    const finalizer = workflow.slice(workflow.indexOf("      - name: " + label));
+    assert.match(finalizer, /if: \$\{\{ always\(\) && steps\.pr\.outputs\.number != '' \}\}/);
+    assert.ok(workflow.indexOf(label) > workflow.indexOf("Replace stuck processing status on failure"));
+    assert.match(finalizer, /benchmark-ci-run:/);
+    assert.match(finalizer, /benchmark-state:processing/);
+    assert.match(finalizer, /benchmark-state:unavailable/);
+  }
+  const scripts = files.map(text => extractScript(text,
+    "Reconcile skipped or interrupted processing status"));
+  assert.equal(scripts[0], scripts[1]);
+  assert.equal(scripts[0], scripts[2]);
 });
