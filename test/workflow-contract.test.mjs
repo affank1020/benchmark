@@ -47,25 +47,86 @@ test("dogfood job only publishes trusted completed PR CI results", async () => {
 });
 
 
-test("lifecycle workflow is trusted, API-only, and concurrency-compatible", async () => {
+
+test("early lifecycle uses trusted CI-start workflow_run instead of pull_request_target", async () => {
   const [installed, example, publisher] = await Promise.all([
     source("../.github/workflows/benchmark-lifecycle.yml"),
     source("../examples/lifecycle-pr.yml"),
     source("../.github/workflows/benchmark-report.yml")
   ]);
   assert.equal(installed.replace(
-    "# Trusted API-only pull_request_target status workflow. Never checkout PR code.",
-    "# Copy to .github/workflows/benchmark-lifecycle.yml in the consumer.\n# This pull_request_target workflow only uses the trusted GitHub API; never checkout or execute PR code."
+    "# Trusted early reporting on CI start. Never check out or execute PR code.",
+    "# Copy to .github/workflows/benchmark-lifecycle.yml in a consuming repo.\n# Match workflows: [CI] to the existing read-only PR CI workflow name."
   ), example);
-  assert.match(installed, /pull_request_target:[\s\S]*types: \[opened, reopened, synchronize, ready_for_review\]/);
-  assert.match(installed, /issues: write/);
-  assert.doesNotMatch(installed, /actions\/checkout|\brun:|\buses: (?!actions\/github-script@v7)/);
-  assert.match(installed, /current\.head\?\.repo\?\.id !== incoming\.head\.repo\.id/);
-  assert.match(installed, /current\.head\?\.sha !== incoming\.head\.sha/);
-  assert.match(installed, /current\.base\?\.repo\?\.id !== context\.payload\.repository\?\.id/);
-  assert.match(installed, /group: benchmark-report-/);
-  assert.match(publisher, /group: benchmark-report-/);
+  assert.match(installed, /workflow_run:\s*\n\s*workflows: \[CI\]\s*\n\s*types: \[requested, in_progress\]/);
+  assert.doesNotMatch(installed, /pull_request_target:/);
+  assert.match(installed, /if: github\.event\.workflow_run\.event == 'pull_request'/);
+  for (const permission of ["contents: read", "actions: read", "issues: write", "pull-requests: write"]) {
+    assert.ok(installed.includes(permission), permission);
+  }
+  assert.match(installed, /repository: affank1020\/benchmark\s*\n\s*ref: 49710ea637eb1af286405451d212b3f836b66c6a/);
+  assert.match(installed, /persist-credentials: false/);
+  assert.doesNotMatch(installed, /ref: \$\{\{|ref: main|ref: master/);
+  assert.doesNotMatch(installed, /^\s+run:\s*\|/m);
+  assert.equal((installed.match(/^\s+uses: /gm) || []).length, 2);
+  assert.match(installed, /policy\.resolveRunPr\(run, github, context\.repo\)/);
+  assert.match(installed, /policy\.matchesRunToPr\(run, current\)/);
+  assert.match(installed, /policy\.findOwnedReportComment\(comments, marker\)/);
+  assert.match(installed, /liveRun\.status === 'completed'/);
+  assert.match(installed, /benchmark-ci-run:/);
+  assert.match(installed, /candidate\.run_attempt > run\.run_attempt/);
+  const groupLine = source => source.split("\n").find(x => x.trim().startsWith("group: benchmark-report-"));
+  assert.equal(groupLine(installed), groupLine(publisher));
   assert.match(publisher, /Publish processing status on the same PR comment/);
   assert.match(publisher, /Replace stuck processing status on failure/);
   assert.match(publisher, /benchmark-state:ready/);
+});
+
+
+test("CI-start events cannot evict a pending completed publisher from the shared queue", async () => {
+  const workflowPaths = [
+    "../.github/workflows/benchmark-lifecycle.yml",
+    "../examples/lifecycle-pr.yml",
+    "../.github/workflows/benchmark-report.yml",
+    "../examples/report-pr.yml",
+    "../.github/workflows/reusable-report.yml"
+  ];
+  const sources = await Promise.all(workflowPaths.map(source));
+  const blocks = sources.map(workflow => {
+    const found = /^concurrency:\n(?<block>(?:^  .*\n)+)/m.exec(workflow);
+    assert.ok(found, "Workflow must define a concurrency block");
+    const lines = found.groups.block.split("\n").filter(Boolean);
+    const get = key => lines.find(line => line.trimStart().startsWith(key + ":"))
+      ?.trim().slice(key.length + 1).trim();
+    return {
+      group: get("group"),
+      queue: get("queue") ?? "single",
+      cancelInProgress: get("cancel-in-progress")
+    };
+  });
+  for (const [i, block] of blocks.entries()) {
+    assert.equal(block.group, blocks[0].group,
+      workflowPaths[i] + " must share the same writer group");
+    assert.equal(block.queue, "max",
+      workflowPaths[i] + " must preserve multiple pending writers");
+    assert.equal(block.cancelInProgress, "false",
+      workflowPaths[i] + " must not cancel running publishers");
+  }
+
+  // GitHub's documented default queue:single cancels/replaces an already
+  // pending workflow even when cancel-in-progress:false. Model the exact
+  // regression: an older active publisher, a pending completed reporter,
+  // followed by a delayed in_progress lifecycle webhook.
+  const enqueue = (pending, incoming, queueMode) =>
+    queueMode === "single" ? [incoming] : [...pending, incoming];
+  const completed = "current CI completed quality report";
+  const lateEarly = "delayed CI in_progress waiting status";
+  const pending = [completed];
+  assert.deepEqual(enqueue(pending, lateEarly, "single"), [lateEarly],
+    "default concurrency would silently evict the final reporter");
+  for (const block of blocks) {
+    assert.deepEqual(enqueue(pending, lateEarly, block.queue),
+      [completed, lateEarly],
+      "queue:max must keep the completed report pending ahead of the late event");
+  }
 });
