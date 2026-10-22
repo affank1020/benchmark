@@ -8,8 +8,11 @@ test("reusable workflow is callable, artifact-parametrized and uses pinned trust
   const reusable = await load("../.github/workflows/reusable-report.yml");
   assert.match(reusable, /workflow_call:\s*\n\s*inputs:/);
   assert.match(reusable, /artifact_name:[\s\S]*?type: string\s*\n\s*default: benchmark-ci/);
-  assert.match(reusable, /BENCHMARK_ARTIFACT_NAME: \$\{\{ inputs\.artifact_name \}\}/);
-  assert.match(reusable, /name: \$\{\{ inputs\.artifact_name \}\}/);
+  assert.match(reusable, /BENCHMARK_ARTIFACT_NAME: \$\{\{ inputs\.coverage_artifact_name \|\| inputs\.artifact_name \}\}/);
+  assert.match(reusable, /BENCHMARK_TESTS_ARTIFACT_NAME: \$\{\{ inputs\.tests_artifact_name \|\| inputs\.artifact_name \}\}/);
+  assert.match(reusable, /BENCHMARK_COVERAGE_ARTIFACT_NAME: \$\{\{ inputs\.coverage_artifact_name \|\| inputs\.artifact_name \}\}/);
+  assert.match(reusable, /tests_artifact_name:[\s\S]*?default: ''/);
+  assert.match(reusable, /coverage_artifact_name:[\s\S]*?default: ''/);
   assert.match(reusable, /repository: affank1020\/benchmark\s*\n\s*ref: [a-f0-9]{40}/);
   assert.match(reusable, /issues: write\s*\n\s*pull-requests: write/);
   assert.doesNotMatch(reusable, /\bref:\s*(main|master|HEAD|v\d+|\$\{\{)/);
@@ -28,18 +31,19 @@ test("reusable workflow preserves the trusted publisher's complete control flow"
   const reusable = await load("../.github/workflows/reusable-report.yml");
   const installed = await load("../.github/workflows/benchmark-report.yml");
   const coreSection = value => value.slice(value.indexOf("permissions:\n"));
-  let expected = coreSection(installed)
+  const expected = coreSection(installed)
     .replace(
-      "        uses: actions/github-script@v7\n        with:\n          script: |\n            const { owner, repo } = context.repo;\n            const run_id = context.payload.workflow_run.id;",
-      "        uses: actions/github-script@v7\n        env:\n          BENCHMARK_ARTIFACT_NAME: ${{ inputs.artifact_name }}\n        with:\n          script: |\n            const { owner, repo } = context.repo;\n            const run_id = context.payload.workflow_run.id;"
+      "          BENCHMARK_TESTS_ARTIFACT_NAME: benchmark-ci",
+      "          BENCHMARK_TESTS_ARTIFACT_NAME: ${{ inputs.tests_artifact_name || inputs.artifact_name }}"
     )
     .replace(
-      "artifacts.find(a => a.name === 'benchmark-ci' && !a.expired)",
-      "artifacts.find(a => a.name === process.env.BENCHMARK_ARTIFACT_NAME && !a.expired)"
+      "          BENCHMARK_COVERAGE_ARTIFACT_NAME: benchmark-ci",
+      "          BENCHMARK_COVERAGE_ARTIFACT_NAME: ${{ inputs.coverage_artifact_name || inputs.artifact_name }}"
     )
-    .replace("name: benchmark-ci\n          path: artifacts", "name: ${{ inputs.artifact_name }}\n          path: artifacts")
-    .replace("BENCHMARK_ARTIFACT_NAME: benchmark-ci", "BENCHMARK_ARTIFACT_NAME: ${{ inputs.artifact_name }}")
-    .replace("name: benchmark-ci\n          path: baseline", "name: ${{ inputs.artifact_name }}\n          path: baseline");
+    .replace(
+      "          BENCHMARK_ARTIFACT_NAME: benchmark-ci",
+      "          BENCHMARK_ARTIFACT_NAME: ${{ inputs.coverage_artifact_name || inputs.artifact_name }}"
+    );
   assert.equal(coreSection(reusable), expected,
     "Reusable and installed publishers should only differ in intentional input/pinning substitutions");
 });

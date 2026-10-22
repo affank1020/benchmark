@@ -11,6 +11,10 @@ Benchmark's reusable reporter runs in the **consumer repository's trusted defaul
 5. Merge the consumer setup only after its own independent review. GitHub only enables `workflow_run` triggers present on the consumer's **default branch**, not an unmerged feature branch.
 6. Verify that the consumer's exact current `main` SHA has a **successful push CI** with a single nonexpired `benchmark-ci` artifact containing `lcov.info`. A PR targeting an older baseline legitimately has no delta.
 
+## Multi-job CI inputs
+
+The reusable reporter accepts `tests_artifact_name` and `coverage_artifact_name` from independent jobs in the same CI workflow run. Each exact-name artifact is validated and downloaded by ID to an isolated directory; duplicate, oversized or expired artifacts cannot be silently substituted. The baseline comparison uses the coverage artifact name from the exact base-branch push CI run. The default combined `benchmark-ci` format is still supported.
+
 ## Consumer acceptance checks
 
 The optional early-comment workflow listens to the existing read-only CI workflow's `workflow_run` `requested` and `in_progress` events, using reviewed, pinned default-branch code. Waiting appears when CI starts, not necessarily at PR creation; `pull_request_target` is not used. The existing completed-workflow reporter remains the final authority. Ensure the lifecycle and completed reporter (including reusable variants) use the **same concurrency group**, with `queue: max` and `cancel-in-progress: false`, so a late CI-start event cannot evict a pending completed result. GitHub caps queued runs at 100 per group.
