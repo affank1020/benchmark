@@ -304,11 +304,21 @@ jobs:
             }
             const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
               owner, repo, workflow_id: run.workflow_id,
-              head_sha: run.head_sha, event: 'pull_request',
-              status: 'completed', per_page: 100
+              head_sha: run.head_sha, event: 'pull_request', per_page: 100
             });
-            if (!policy.isLatestCompletedRun(run, runs)) {
-              core.warning('A newer CI result exists; skipping stale report.');
+            // Do not publish a completed attempt if a newer attempt is still
+            // queued/in progress. Processing and final publishing use the same
+            // freshness guard, including non-completed newer attempts.
+            if (!policy.isLatestCompletedRun(run, runs.filter(candidate =>
+                  candidate.status === 'completed')) ||
+                runs.some(candidate =>
+                  candidate.workflow_id === run.workflow_id &&
+                  candidate.head_sha === run.head_sha &&
+                  candidate.event === 'pull_request' &&
+                  (candidate.run_number > run.run_number ||
+                    (candidate.run_number === run.run_number &&
+                     candidate.run_attempt > run.run_attempt)))) {
+              core.warning('A newer CI run exists; skipping stale report.');
               return;
             }
             // A selected base coverage artifact is valid only for the exact

@@ -41,7 +41,7 @@ test("dogfood job only publishes trusted completed PR CI results", async () => {
   assert.match(workflow, /group: benchmark-report-\$\{\{ github\.repository_id \}\}-\$\{\{ github\.event\.workflow_run\.head_repository\.id \}\}/);
   assert.doesNotMatch(workflow, /workflow_run\.pull_requests\[0\]\.number/);
   assert.match(workflow, /policy\.matchesRunToPr\(run, current\)/);
-  assert.match(workflow, /policy\.isLatestCompletedRun\(run, runs\)/);
+  assert.match(workflow, /policy\.isLatestCompletedRun\(run, runs\.filter\(candidate =>/);
   assert.match(workflow, /policy\.findOwnedReportComment\(comments, marker\)/);
   assert.doesNotMatch(workflow, /ref: \$\{\{ github\.event\.pull_request\.head/);
 });
