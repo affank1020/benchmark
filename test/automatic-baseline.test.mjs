@@ -305,8 +305,8 @@ test("installed and public full workflow remain synchronized; reusable variant u
     assert.match(workflow, /ref: 81b6602198c38a74d6b539a484ff25b86c8e0cc8/);
     assert.match(workflow, /BENCHMARK_BASE_SHA:/);
   }
-  assert.match(reusable, /BENCHMARK_ARTIFACT_NAME: \$\{\{ inputs\.artifact_name \}\}/);
-  assert.match(reusable, /name: \$\{\{ inputs\.artifact_name \}\}/);
+  assert.match(reusable, /BENCHMARK_ARTIFACT_NAME: \$\{\{ inputs\.coverage_artifact_name \|\| inputs\.artifact_name \}\}/);
+  assert.match(reusable, /BENCHMARK_COVERAGE_ARTIFACT_NAME: \$\{\{ inputs\.coverage_artifact_name \|\| inputs\.artifact_name \}\}/);
   assert.equal(
     extractScript(reusable, "Find exact base-branch coverage artifact"),
     extractScript(installed, "Find exact base-branch coverage artifact")

@@ -102,6 +102,23 @@ Fork-originated `workflow_run` events may omit pull-request associations, and Gi
 
 The reporting workflow uses `workflow_run`, which GitHub only activates from the default branch. A change to the reporter workflow in a PR cannot validate its own publishing behaviour until merged; subsequent PRs exercise the end-to-end path. `test/workflow-contract.test.mjs` guards drift between the installed workflow and the example. For new repositories, follow the integration instructions below instead of copying the Benchmark-specific workflow without review.
 
+## Multi-job CI artifacts (independent JUnit and LCOV jobs)
+
+Benchmark accepts separate artifacts from different jobs within the **same completed CI workflow run**, without rerunning tests. The legacy combined `benchmark-ci` artifact works unchanged. The trusted publisher selects each artifact by **unique exact name**, validates artifact IDs and compressed size (up to 25 MiB per input), then downloads JUnit and LCOV into isolated paths so filenames cannot overwrite each other.
+
+In a reviewed release of the [reusable reporter](.github/workflows/reusable-report.yml), the caller can specify:
+
+```yaml
+with:
+  artifact_name: benchmark-ci
+  tests_artifact_name: ci-junit
+  coverage_artifact_name: ci-lcov
+```
+
+The read-only PR CI workflow uploads `junit.xml` at the root of `ci-junit` and `lcov.info` at the root of `ci-lcov`. The **exact-base** comparison looks for the same `ci-lcov` artifact in the successful base-branch push CI. Both optional names default to `artifact_name`. Missing, expired, oversized or duplicate artifacts remain unavailable rather than being guessed or silently replaced.
+
+For the full workflow example, configure `BENCHMARK_TESTS_ARTIFACT_NAME`, `BENCHMARK_COVERAGE_ARTIFACT_NAME`, and the baseline's `BENCHMARK_ARTIFACT_NAME` together. Consumers with older immutable workflow pins continue using combined artifacts until they explicitly upgrade to a reviewed new release.
+
 ## Early status comment lifecycle
 
 To let contributors know Benchmark is working before CI finishes, enable the separate, trusted [PR lifecycle workflow](examples/lifecycle-pr.yml) alongside the [existing post-CI publisher](examples/report-pr.yml). The lifecycle workflow runs via `pull_request_target` on PR open/reopen/new commits, but **never checks out, installs, imports or executes the pull-request code**: it only validates the current PR against its event identity through GitHub's API, then creates or updates one bot-owned comment using the existing invisible marker.

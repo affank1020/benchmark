@@ -113,10 +113,13 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Preflight artifact download size
+      - name: Resolve bounded CI artifacts by exact name
         if: steps.pr.outputs.number != ''
         id: artifact
         uses: actions/github-script@v7
+        env:
+          BENCHMARK_TESTS_ARTIFACT_NAME: benchmark-ci
+          BENCHMARK_COVERAGE_ARTIFACT_NAME: benchmark-ci
         with:
           script: |
             const { owner, repo } = context.repo;
@@ -124,23 +127,51 @@ jobs:
             const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
               owner, repo, run_id, per_page: 100
             });
-            const source = artifacts.find(a => a.name === 'benchmark-ci' && !a.expired);
-            if (!source) {
-              core.warning('Benchmark CI artifact not available.');
-            } else if (source.size_in_bytes > 25 * 1024 * 1024) {
-              core.warning('Benchmark CI artifact exceeds 25 MiB compressed limit.');
-            } else {
-              core.setOutput('present', 'true');
+            // Separate CI jobs may upload JUnit and LCOV independently. Resolve
+            // exact unique artifact IDs before download; do not select by name later.
+            for (const [kind, name] of [
+              ['tests', process.env.BENCHMARK_TESTS_ARTIFACT_NAME],
+              ['coverage', process.env.BENCHMARK_COVERAGE_ARTIFACT_NAME]
+            ]) {
+              if (typeof name !== 'string' || !name || name.length > 128) {
+                throw new Error('Invalid ' + kind + ' artifact name');
+              }
+              const matching = artifacts.filter(a => a.name === name);
+              if (matching.length !== 1) {
+                core.warning('No unique CI ' + kind + ' artifact named ' + name);
+                continue;
+              }
+              const source = matching[0];
+              if (!Number.isSafeInteger(source.id) || source.id <= 0 ||
+                  source.expired ||
+                  !Number.isSafeInteger(source.size_in_bytes) ||
+                  source.size_in_bytes <= 0 ||
+                  source.size_in_bytes > 25 * 1024 * 1024) {
+                core.warning('CI ' + kind + ' artifact unavailable or larger than 25 MiB');
+                continue;
+              }
+              core.setOutput(kind + '_id', String(source.id));
             }
-      - name: Download existing CI report artifact
-        if: steps.artifact.outputs.present == 'true'
+      - name: Download exact CI test artifact
+        if: steps.artifact.outputs.tests_id != ''
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          name: benchmark-ci
-          path: artifacts
+          artifact-ids: ${{ steps.artifact.outputs.tests_id }}
+          merge-multiple: true
+          path: artifacts/tests
+      - name: Download exact CI coverage artifact
+        if: steps.artifact.outputs.coverage_id != ''
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          artifact-ids: ${{ steps.artifact.outputs.coverage_id }}
+          merge-multiple: true
+          path: artifacts/coverage
       - name: Find exact base-branch coverage artifact
         id: baseline
         if: steps.pr.outputs.number != ''
@@ -246,8 +277,8 @@ jobs:
             baseline_args=(--baseline-coverage baseline/lcov.info)
           fi
           node --experimental-strip-types benchmark/src/cli.mjs \
-            --coverage artifacts/lcov.info \
-            --tests artifacts/junit.xml \
+            --coverage artifacts/coverage/lcov.info \
+            --tests artifacts/tests/junit.xml \
             --ci "$CI_CONCLUSION" \
             "${baseline_args[@]}" \
             --output benchmark-report.md
