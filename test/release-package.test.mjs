@@ -37,7 +37,9 @@ test("release packaging emits SHA-pinned consumers, an exact CLI archive, manife
     assert.match(lifecycle, /workflow_run:\s*\n\s*workflows: \[CI\]/);
     assert.ok(lifecycle.includes("ref: " + sha + " # Reviewed immutable release commit"));
     assert.doesNotMatch(lifecycle, /pull_request_target:/);
-    assert.doesNotMatch(caller + lifecycle, /@main|@master|ref: main\b/);
+    const active = (v) => v.split("\n").filter(x => !x.trimStart().startsWith("#")).join("\n");
+    assert.doesNotMatch(active(caller) + active(lifecycle), /@main|@master|ref: main\b/);
+    assert.ok(caller.includes("# Pinned to reviewed Benchmark v0.1.0 release."));
     const manifest = JSON.parse(await readFile(join(out, "release-manifest.json"), "utf8"));
     assert.equal(manifest.version, "v0.1.0");
     assert.equal(manifest.commit, sha);
@@ -105,5 +107,5 @@ test("release workflow publishes only an annotated tag reachable from main", asy
 test("consumer example uses the most recently reviewed immutable release", async () => {
   const sample = await readFile(new URL("../examples/use-reusable-report.yml", import.meta.url), "utf8");
   assert.match(sample, /reusable-report\.yml@eb53a1881039fcd53ecce821f327bd0b6990acb8/);
-  assert.doesNotMatch(sample, /@main|pull_request_target/);
+  assert.doesNotMatch(sample.split("\n").filter(x => !x.trimStart().startsWith("#")).join("\n"), /@main|pull_request_target/);
 });

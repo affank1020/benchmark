@@ -49,6 +49,10 @@ const pinnedCaller = pinExactlyOnce(
   (_, prefix) => prefix + sha,
   "consumer reporter"
 );
+const releaseCaller = pinnedCaller.replace(
+  /^# Pinned to reviewed Benchmark PR #\d+ merge\. Deliberately upgrade only$/m,
+  "# Pinned to reviewed Benchmark " + tag + " release. Deliberately upgrade only"
+);
 const lifecycle = await readFile(join(root, "examples/lifecycle-pr.yml"), "utf8");
 const pinnedLifecycle = pinExactlyOnce(
   lifecycle,
@@ -56,16 +60,24 @@ const pinnedLifecycle = pinExactlyOnce(
   (_, prefix) => prefix + sha + " # Reviewed immutable release commit",
   "early-status matcher"
 );
-if (!pinnedCaller.includes("workflow_run:") ||
-    !pinnedLifecycle.includes("workflow_run:") ||
-    pinnedLifecycle.includes("pull_request_target:") ||
-    pinnedCaller.includes("@main")) {
+// Safety checks must inspect executable YAML, not comments explaining
+// why mutable refs and the untrusted event type are forbidden.
+const activeYaml = value => value.split("\n").filter(line =>
+  !line.trimStart().startsWith("#")
+).join("\n");
+const activeCaller = activeYaml(releaseCaller);
+const activeLifecycle = activeYaml(pinnedLifecycle);
+if (!activeCaller.includes("workflow_run:") ||
+    !activeLifecycle.includes("workflow_run:") ||
+    activeLifecycle.includes("pull_request_target:") ||
+    /\buses:\s*[^\n]*@(?:main|master)\b/.test(activeCaller) ||
+    /\bref:\s*(?:main|master)\b/.test(activeLifecycle)) {
   throw new Error("Consumer templates must use trusted workflow_run and immutable code");
 }
 
 const archive = "benchmark-cli-" + tag + ".tar.gz";
 const files = ["benchmark-report.yml", "benchmark-lifecycle.yml", archive];
-await writeFile(join(out, files[0]), pinnedCaller, { flag: "wx" });
+await writeFile(join(out, files[0]), releaseCaller, { flag: "wx" });
 await writeFile(join(out, files[1]), pinnedLifecycle, { flag: "wx" });
 // git archive always reads the verified commit, not the working directory.
 // Package only the dependency-free CLI runtime (not CI workflows or tests).

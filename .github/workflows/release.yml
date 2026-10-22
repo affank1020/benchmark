@@ -48,7 +48,7 @@ jobs:
           node scripts/package-release.mjs --version "$TAG" --out-dir dist
           cd dist
           sha256sum --check SHA256SUMS
-          tar -tzf "benchmark-cli-$TAG.tar.gz" | grep -q "/src/cli.mjs"
+          tar -tzf "benchmark-cli-$TAG.tar.gz" | grep "/src/cli.mjs$"
       - name: Create release for the existing tag only
         env:
           GH_TOKEN: ${{ github.token }}
