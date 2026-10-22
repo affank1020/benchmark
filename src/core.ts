@@ -13,10 +13,12 @@ export type CoverageChange = {
 export function compareCoverage(current?: Coverage, baseline?: Coverage): CoverageChange | undefined {
   if (!baseline) return undefined;
   const diff = (metric: keyof Coverage) => {
-    const now = current?.[metric].percent;
-    const before = baseline[metric].percent;
-    if (now == null || before == null) return null;
-    const value = Math.round((now - before) * 100) / 100;
+    const now = current?.[metric];
+    const before = baseline[metric];
+    if (!now || !before || now.found === 0 || before.found === 0) return null;
+    // Subtract exact ratios before rounding once. Rounded displayed rates
+    // can differ from the rounded difference by 0.01 percentage points.
+    const value = Math.round((now.hit / now.found - before.hit / before.found) * 10000) / 100;
     return value === 0 ? 0 : value;
   };
   return { lines: diff("lines"), functions: diff("functions"), branches: diff("branches") };
@@ -42,26 +44,62 @@ function nonnegative(value: unknown): number {
 }
 
 export function parseLcov(text: string): Coverage {
-  let lh = 0, lf = 0, fnh = 0, fnf = 0, brh = 0, brf = 0;
+  const totals: Record<string, number> = {
+    LH: 0, LF: 0, FNH: 0, FNF: 0, BRH: 0, BRF: 0
+  };
+  const pairs = [["LH", "LF"], ["FNH", "FNF"], ["BRH", "BRF"]] as const;
+  const keys = new Set(Object.keys(totals));
+  let record: Record<string, number> = Object.create(null);
+  let hasRecordData = false;
   let records = 0;
-  for (const line of text.split(/\r?\n/)) {
-    const match = /^(LH|LF|FNH|FNF|BRH|BRF):(\d+)$/.exec(line.trim());
-    if (match) {
-      const n = nonnegative(match[2]);
-      switch (match[1]) {
-        case "LH": lh += n; break;
-        case "LF": lf += n; break;
-        case "FNH": fnh += n; break;
-        case "FNF": fnf += n; break;
-        case "BRH": brh += n; break;
-        case "BRF": brf += n; break;
+
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    if (line === "end_of_record") {
+      if (!hasRecordData || Object.keys(record).length === 0) {
+        throw new Error("LCOV record missing coverage summary");
       }
+      for (const [hit, found] of pairs) {
+        const hasHit = Object.hasOwn(record, hit);
+        const hasFound = Object.hasOwn(record, found);
+        if (hasHit !== hasFound) {
+          throw new Error(`Incomplete LCOV ${hit}/${found} summary`);
+        }
+        if (hasHit) {
+          if (record[hit] > record[found]) throw new Error("Invalid LCOV totals");
+          totals[hit] = nonnegative(totals[hit] + record[hit]);
+          totals[found] = nonnegative(totals[found] + record[found]);
+        }
+      }
+      records++;
+      record = Object.create(null);
+      hasRecordData = false;
+      continue;
     }
-    if (line.trim() === "end_of_record") records++;
+
+    hasRecordData = true;
+    const field = /^([A-Z][A-Z0-9_]*):(.*)$/.exec(line);
+    if (field && keys.has(field[1])) {
+      if (!/^\d+$/.test(field[2]) || Object.hasOwn(record, field[1])) {
+        throw new Error(`Invalid or duplicate LCOV ${field[1]} summary`);
+      }
+      record[field[1]] = nonnegative(field[2]);
+    } else if (/^(?:LH|LF|FNH|FNF|BRH|BRF)\b/.test(line)) {
+      // Summary fields with invalid syntax must never be ignored as
+      // unrecognised metadata, especially for coverage baselines.
+      throw new Error("Malformed LCOV summary");
+    }
+    // Other standard LCOV fields (SF, DA, FN, FNDA, BRDA, TN, etc.)
+    // are accepted but never treated as summary counts.
   }
+  if (hasRecordData) throw new Error("Unterminated LCOV record");
   if (records === 0) throw new Error("No LCOV records");
-  if (lh > lf || fnh > fnf || brh > brf) throw new Error("Invalid LCOV totals");
-  return { lines: rate(lh, lf), functions: rate(fnh, fnf), branches: rate(brh, brf) };
+  return {
+    lines: rate(totals.LH, totals.LF),
+    functions: rate(totals.FNH, totals.FNF),
+    branches: rate(totals.BRH, totals.BRF)
+  };
 }
 
 // Recognise XML tags without treating a '>' inside quoted attributes as an
