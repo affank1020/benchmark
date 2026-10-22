@@ -20,6 +20,9 @@ test("CI produces source-only LCOV and JUnit together on pushes and PRs", async 
   assert.match(ci, /--test-reporter=junit --test-reporter-destination=junit\.xml/);
   assert.match(ci, /--test-reporter=lcov --test-reporter-destination=lcov\.info/);
   assert.match(ci, /--coverage lcov\.info --ci failure --json benchmark-smoke\.json/);
+  assert.match(ci, /node test\/verify-lcov-inventory\.mjs lcov\.info/);
+  assert.ok(ci.indexOf('node test/verify-lcov-inventory.mjs lcov.info') < ci.indexOf('--coverage lcov.info --ci failure'),
+    'check the tracked source inventory before parsing or uploading coverage');
   assert.match(ci, /TEST_OUTCOME: \$\{\{ steps\.tests\.outcome \}\}/);
   const upload = ci.slice(ci.indexOf("      - name: Upload Benchmark inputs"));
   assert.match(upload, /if: always\(\)/);
