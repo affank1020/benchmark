@@ -96,7 +96,7 @@ async function choose({ pull = pr, candidates = [exact], artifacts = [artifact],
 test("selects the exact successful base-branch push run and bounded artifact", async () => {
   const result = await choose();
   assert.deepEqual(result.outputs, {
-    present: "true", run_id: "999", base_sha: "base-sha"
+    present: "true", run_id: "999", base_sha: "base-sha", base_ref: "main"
   });
   const query = result.requests.find(r => r.api === "listWorkflowRuns").args;
   assert.equal(query.head_sha, "base-sha");
@@ -169,6 +169,8 @@ test("publisher only passes a downloaded baseline and rechecks its base SHA at p
   assert.match(installed, /if \[ -f baseline\/lcov\.info \]; then[\s\S]*?baseline_args=\(--baseline-coverage baseline\/lcov\.info\)/);
   assert.match(installed, /"\$\{baseline_args\[@\]\}"/);
   assert.match(installed, /BENCHMARK_BASE_SHA: \$\{\{ steps\.baseline\.outputs\.base_sha \}\}/);
+  assert.match(installed, /BENCHMARK_BASE_REF: \$\{\{ steps\.baseline\.outputs\.base_ref \}\}/);
+  assert.match(installed, /current\.base\?\.ref !== process\.env\.BENCHMARK_BASE_REF/);
   assert.match(installed, /current\.base\?\.sha !== process\.env\.BENCHMARK_BASE_SHA/);
   assert.doesNotMatch(installed, /checkout[\s\S]{0,100}ref: \$\{\{/);
 });
