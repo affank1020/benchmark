@@ -172,6 +172,9 @@ jobs:
           run-id: ${{ steps.baseline.outputs.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           artifact-ids: ${{ steps.baseline.outputs.artifact_id }}
+          # ID-based downloads otherwise extract to baseline/<artifact-name>/.
+          # Only one validated artifact ID is supplied, so merging is safe.
+          merge-multiple: true
           path: baseline
       - name: Generate quality report (even after CI failure)
         if: steps.pr.outputs.number != ''
