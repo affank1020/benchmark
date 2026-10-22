@@ -146,19 +146,28 @@ jobs:
             const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
               owner, repo, run_id: latest.id, per_page: 100
             });
-            const source = artifacts.find(artifact =>
-              artifact.name === process.env.BENCHMARK_ARTIFACT_NAME &&
-              !artifact.expired &&
-              Number.isSafeInteger(artifact.size_in_bytes) &&
-              artifact.size_in_bytes > 0 &&
-              artifact.size_in_bytes <= 25 * 1024 * 1024
+            // Reruns may leave multiple artifacts with the same name.
+            // Fail closed on ambiguity; never validate one and download another.
+            const named = artifacts.filter(artifact =>
+              artifact.name === process.env.BENCHMARK_ARTIFACT_NAME
             );
-            if (!source) {
-              core.notice('Exact base CI has no usable Benchmark artifact; omitting coverage comparison.');
+            if (named.length !== 1) {
+              core.notice('No unique base CI artifact for this name; omitting coverage comparison.');
+              return;
+            }
+            const source = named[0];
+            if (!Number.isSafeInteger(source.id) || source.id <= 0 ||
+                source.expired ||
+                !Number.isSafeInteger(source.size_in_bytes) ||
+                source.size_in_bytes <= 0 ||
+                source.size_in_bytes > 25 * 1024 * 1024) {
+              core.notice('Exact base CI has no usable bounded artifact; omitting coverage comparison.');
               return;
             }
             core.setOutput('present', 'true');
             core.setOutput('run_id', String(latest.id));
+            core.setOutput('run_attempt', String(latest.run_attempt));
+            core.setOutput('artifact_id', String(source.id));
             core.setOutput('base_sha', base.sha);
             core.setOutput('base_ref', base.ref);
       - name: Download exact base CI artifact
@@ -168,7 +177,7 @@ jobs:
         with:
           run-id: ${{ steps.baseline.outputs.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          name: ${{ inputs.artifact_name }}
+          artifact-ids: ${{ steps.baseline.outputs.artifact_id }}
           path: baseline
       - name: Generate quality report (even after CI failure)
         if: steps.pr.outputs.number != ''
@@ -193,6 +202,8 @@ jobs:
           BENCHMARK_PR_NUMBER: ${{ steps.pr.outputs.number }}
           BENCHMARK_BASE_SHA: ${{ steps.baseline.outputs.base_sha }}
           BENCHMARK_BASE_REF: ${{ steps.baseline.outputs.base_ref }}
+          BENCHMARK_BASE_RUN_ID: ${{ steps.baseline.outputs.run_id }}
+          BENCHMARK_BASE_RUN_ATTEMPT: ${{ steps.baseline.outputs.run_attempt }}
         with:
           script: |
             const { readFileSync } = require('fs');
@@ -238,6 +249,55 @@ jobs:
             if (!policy.isLatestCompletedRun(run, runs)) {
               core.warning('A newer CI result exists; skipping stale report.');
               return;
+            }
+            // A selected base coverage artifact is valid only for the exact
+            // successful CI attempt that produced it. Reruns or newer failed
+            // pushes at the same base SHA must not publish stale comparisons.
+            if (process.env.BENCHMARK_BASE_RUN_ID) {
+              const selectedId = Number(process.env.BENCHMARK_BASE_RUN_ID);
+              const selectedAttempt = Number(process.env.BENCHMARK_BASE_RUN_ATTEMPT);
+              if (!Number.isSafeInteger(selectedId) || selectedId <= 0 ||
+                  !Number.isSafeInteger(selectedAttempt) || selectedAttempt <= 0) {
+                core.warning('Invalid selected baseline CI run; skipping stale report.');
+                return;
+              }
+              const { data: selectedRun } = await github.rest.actions.getWorkflowRun({
+                owner, repo, run_id: selectedId
+              });
+              if (selectedRun.run_attempt !== selectedAttempt ||
+                  selectedRun.status !== 'completed' ||
+                  selectedRun.conclusion !== 'success' ||
+                  selectedRun.event !== 'push' ||
+                  selectedRun.workflow_id !== run.workflow_id ||
+                  selectedRun.repository?.id !== current.base?.repo?.id ||
+                  selectedRun.head_sha !== current.base?.sha ||
+                  selectedRun.head_branch !== current.base?.ref) {
+                core.warning('Selected base CI run is no longer valid; skipping stale report.');
+                return;
+              }
+              const baseRuns = await github.paginate(github.rest.actions.listWorkflowRuns, {
+                owner, repo, workflow_id: run.workflow_id,
+                branch: current.base.ref, head_sha: current.base.sha,
+                event: 'push', status: 'completed', per_page: 100
+              });
+              const matching = baseRuns.filter(candidate =>
+                candidate.repository?.id === current.base.repo.id &&
+                candidate.workflow_id === run.workflow_id &&
+                candidate.head_sha === current.base.sha &&
+                candidate.head_branch === current.base.ref &&
+                candidate.event === 'push' &&
+                candidate.status === 'completed' &&
+                Number.isSafeInteger(candidate.run_number) &&
+                Number.isSafeInteger(candidate.run_attempt)
+              ).sort((a, b) => b.run_number - a.run_number ||
+                b.run_attempt - a.run_attempt);
+              const latest = matching[0];
+              if (!latest || latest.id !== selectedId ||
+                  latest.run_attempt !== selectedAttempt ||
+                  latest.conclusion !== 'success') {
+                core.warning('A newer base CI result exists; skipping stale report.');
+                return;
+              }
             }
             // This read/modify/write is serialized by workflow concurrency.
             const comments = await github.paginate(github.rest.issues.listComments, {
