@@ -154,6 +154,7 @@ jobs:
             core.setOutput('present', 'true');
             core.setOutput('run_id', String(latest.id));
             core.setOutput('base_sha', base.sha);
+            core.setOutput('base_ref', base.ref);
       - name: Download exact base CI artifact
         if: steps.baseline.outputs.present == 'true'
         continue-on-error: true
@@ -185,6 +186,7 @@ jobs:
         env:
           BENCHMARK_PR_NUMBER: ${{ steps.pr.outputs.number }}
           BENCHMARK_BASE_SHA: ${{ steps.baseline.outputs.base_sha }}
+          BENCHMARK_BASE_REF: ${{ steps.baseline.outputs.base_ref }}
         with:
           script: |
             const { readFileSync } = require('fs');
@@ -210,8 +212,9 @@ jobs:
               return;
             }
             if (process.env.BENCHMARK_BASE_SHA &&
-                current.base?.sha !== process.env.BENCHMARK_BASE_SHA) {
-              core.warning('PR base SHA changed after baseline selection; skipping stale report.');
+                (current.base?.sha !== process.env.BENCHMARK_BASE_SHA ||
+                 current.base?.ref !== process.env.BENCHMARK_BASE_REF)) {
+              core.warning('PR base commit or branch changed after baseline selection; skipping stale report.');
               return;
             }
             const { data: currentRun } = await github.rest.actions.getWorkflowRun({
