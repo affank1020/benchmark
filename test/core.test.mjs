@@ -12,6 +12,36 @@ test("LCOV rejects missing records and inconsistent totals", () => {
   assert.throws(() => parseLcov("LF:10\nLH:10"));
   assert.throws(() => parseLcov("SF:x\nLF:1\nLH:2\nend_of_record"));
 });
+test("LCOV rejects malformed and incomplete summaries rather than zero-fill", () => {
+  for (const sample of [
+    "LF:10\nLH:invalid\nend_of_record",
+    "LF:10\nend_of_record",
+    "LH:5\nend_of_record",
+    "FNF:2\nend_of_record",
+    "FNH:1\nend_of_record",
+    "BRF:2\nend_of_record",
+    "BRH:1\nend_of_record",
+    "LF:10\nLH:-1\nend_of_record",
+    "LF:10\nLH:2.5\nend_of_record",
+    "LF:10\nLH:2\nLH:3\nend_of_record",
+    "LF:10\nLH:11\nend_of_record",
+    "SF:without-any-summary.ts\nend_of_record",
+    "LF:3\nLH:2\nend_of_record\nLF:7\nLH:8\nend_of_record",
+    "LF:3\nLH:2\nend_of_record\nLF:7\nend_of_record",
+    "LF:1\nLH:1"
+  ]) {
+    assert.throws(() => parseLcov(sample), /LCOV|record/, sample);
+  }
+});
+test("LCOV sums independent complete records and ignores ordinary detail fields", () => {
+  const coverage = parseLcov(
+    "TN:example\nSF:a.ts\nDA:1,1\nLF:3\nLH:2\nFNF:1\nFNH:0\nend_of_record\n" +
+    "SF:b.ts\nDA:1,0\nLF:7\nLH:3\nBRF:2\nBRH:1\nend_of_record"
+  );
+  assert.equal(coverage.lines.percent, 50);
+  assert.equal(coverage.functions.percent, 0);
+  assert.equal(coverage.branches.percent, 50);
+});
 test("coverage comparison reports signed percentage-point deltas", () => {
   const current = parseLcov("LF:10\nLH:6\nFNF:4\nFNH:2\nBRF:4\nBRH:2\nend_of_record");
   const baseline = parseLcov("LF:10\nLH:5\nFNF:4\nFNH:2\nBRF:4\nBRH:3\nend_of_record");
@@ -30,9 +60,9 @@ test("coverage comparison reports signed percentage-point deltas", () => {
 test("fractional baseline changes are rounded to two decimal percentage points", () => {
   const current = parseLcov("LF:3\nLH:2\nend_of_record");
   const baseline = parseLcov("LF:3\nLH:1\nend_of_record");
-  assert.equal(compareCoverage(current, baseline)?.lines, 33.34);
+  assert.equal(compareCoverage(current, baseline)?.lines, 33.33);
   const markdown = renderMarkdown({ ci: "success", coverage: current, baselineCoverage: baseline });
-  assert.match(markdown, /\| Line coverage \| 66\.67% \| 33\.33% \| \+33\.34 pp \|/);
+  assert.match(markdown, /\| Line coverage \| 66\.67% \| 33\.33% \| \+33\.33 pp \|/);
 });
 test("unavailable baseline/current metrics never become zero or a fabricated delta", () => {
   const current = parseLcov("LF:10\nLH:0\nFNF:0\nFNH:0\nBRF:4\nBRH:0\nend_of_record");
