@@ -8,6 +8,7 @@ on:
 permissions:
   contents: read
   issues: write
+  pull-requests: write
 
 # Coordinate with the workflow_run publisher across workflows for the same source.
 concurrency:

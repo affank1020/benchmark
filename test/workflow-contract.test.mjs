@@ -59,6 +59,7 @@ test("lifecycle workflow is trusted, API-only, and concurrency-compatible", asyn
   ), example);
   assert.match(installed, /pull_request_target:[\s\S]*types: \[opened, reopened, synchronize, ready_for_review\]/);
   assert.match(installed, /issues: write/);
+  assert.match(installed, /pull-requests: write/);
   assert.doesNotMatch(installed, /actions\/checkout|\brun:|\buses: (?!actions\/github-script@v7)/);
   assert.match(installed, /current\.head\?\.repo\?\.id !== incoming\.head\.repo\.id/);
   assert.match(installed, /current\.head\?\.sha !== incoming\.head\.sha/);
