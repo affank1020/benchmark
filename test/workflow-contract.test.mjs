@@ -45,3 +45,27 @@ test("dogfood job only publishes trusted completed PR CI results", async () => {
   assert.match(workflow, /policy\.findOwnedReportComment\(comments, marker\)/);
   assert.doesNotMatch(workflow, /ref: \$\{\{ github\.event\.pull_request\.head/);
 });
+
+
+test("lifecycle workflow is trusted, API-only, and concurrency-compatible", async () => {
+  const [installed, example, publisher] = await Promise.all([
+    source("../.github/workflows/benchmark-lifecycle.yml"),
+    source("../examples/lifecycle-pr.yml"),
+    source("../.github/workflows/benchmark-report.yml")
+  ]);
+  assert.equal(installed.replace(
+    "# Trusted API-only pull_request_target status workflow. Never checkout PR code.",
+    "# Copy to .github/workflows/benchmark-lifecycle.yml in the consumer.\n# This pull_request_target workflow only uses the trusted GitHub API; never checkout or execute PR code."
+  ), example);
+  assert.match(installed, /pull_request_target:[\s\S]*types: \[opened, reopened, synchronize, ready_for_review\]/);
+  assert.match(installed, /issues: write/);
+  assert.doesNotMatch(installed, /actions\/checkout|\brun:|\buses: (?!actions\/github-script@v7)/);
+  assert.match(installed, /current\.head\?\.repo\?\.id !== incoming\.head\.repo\.id/);
+  assert.match(installed, /current\.head\?\.sha !== incoming\.head\.sha/);
+  assert.match(installed, /current\.base\?\.repo\?\.id !== context\.payload\.repository\?\.id/);
+  assert.match(installed, /group: benchmark-report-/);
+  assert.match(publisher, /group: benchmark-report-/);
+  assert.match(publisher, /Publish processing status on the same PR comment/);
+  assert.match(publisher, /Replace stuck processing status on failure/);
+  assert.match(publisher, /benchmark-state:ready/);
+});

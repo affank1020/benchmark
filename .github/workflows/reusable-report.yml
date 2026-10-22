@@ -53,6 +53,64 @@ jobs:
             } else {
               core.warning('No uniquely verified open PR for this CI run; not publishing.');
             }
+      - name: Publish processing status on the same PR comment
+        if: steps.pr.outputs.number != ''
+        uses: actions/github-script@v7
+        env:
+          BENCHMARK_PR_NUMBER: ${{ steps.pr.outputs.number }}
+        with:
+          script: |
+            const { pathToFileURL } = require('url');
+            const policy = await import(pathToFileURL(
+              process.env.GITHUB_WORKSPACE + '/benchmark/src/publish-policy.mjs'
+            ).href);
+            const { owner, repo } = context.repo;
+            const run = context.payload.workflow_run;
+            const issue_number = Number(process.env.BENCHMARK_PR_NUMBER);
+            if (!Number.isSafeInteger(issue_number) || issue_number < 1) throw new Error('Invalid PR number');
+            const { data: current } = await github.rest.pulls.get({
+              owner, repo, pull_number: issue_number
+            });
+            if (current.base?.repo?.full_name !== owner + '/' + repo ||
+                !policy.matchesRunToPr(run, current)) {
+              core.warning('PR is closed, retargeted, or changed; status not published.');
+              return;
+            }
+            const { data: liveRun } = await github.rest.actions.getWorkflowRun({ owner, repo, run_id: run.id });
+            if (liveRun.id !== run.id || liveRun.run_attempt !== run.run_attempt ||
+                liveRun.status !== 'completed' || liveRun.head_sha !== run.head_sha) {
+              core.warning('Source CI was superseded or restarted; status not published.');
+              return;
+            }
+            const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+              owner, repo, workflow_id: run.workflow_id, head_sha: run.head_sha,
+              event: 'pull_request', per_page: 100
+            });
+            if (!policy.isLatestCompletedRun(run, runs.filter(r => r.status === 'completed')) ||
+                runs.some(r => r.workflow_id === run.workflow_id && r.head_sha === run.head_sha &&
+                  r.event === 'pull_request' &&
+                  (r.run_number > run.run_number ||
+                    (r.run_number === run.run_number && r.run_attempt > run.run_attempt)))) {
+              core.warning('A newer CI run exists; status not published.');
+              return;
+            }
+            const marker = '<!-- benchmark-pr-quality-report -->';
+            const metadata = '<!-- benchmark-head-sha:' + current.head.sha + ' -->';
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number, per_page: 100
+            });
+            const previous = policy.findOwnedReportComment(comments, marker);
+            const body = [marker, metadata, '<!-- benchmark-state:processing -->',
+              '## Benchmark · Preparing PR Quality Report',
+              '🔄 **Processing CI results**',
+              'CI has finished. Benchmark is retrieving test and coverage results and preparing the report.',
+              '[View CI run](https://github.com/' + owner + '/' + repo + '/actions/runs/' + run.id + ')'
+            ].join('\n\n');
+            if (previous) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: previous.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
       - name: Set up supported Node.js runtime
         if: steps.pr.outputs.number != ''
         uses: actions/setup-node@v4
@@ -307,6 +365,67 @@ jobs:
               owner, repo, issue_number, per_page: 100
             });
             const previous = policy.findOwnedReportComment(comments, marker);
+            const ready = body.replace(marker,
+              marker + '\n<!-- benchmark-head-sha:' + current.head.sha + ' -->\n<!-- benchmark-state:ready -->');
+            if (ready.length > 20000) throw new Error('Benchmark report with metadata is too large');
+            if (previous) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: previous.id, body: ready });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body: ready });
+            }
+      - name: Replace stuck processing status on failure
+        if: ${{ failure() && steps.pr.outputs.number != '' }}
+        uses: actions/github-script@v7
+        env:
+          BENCHMARK_PR_NUMBER: ${{ steps.pr.outputs.number }}
+        with:
+          script: |
+            const { pathToFileURL } = require('url');
+            const policy = await import(pathToFileURL(
+              process.env.GITHUB_WORKSPACE + '/benchmark/src/publish-policy.mjs'
+            ).href);
+            const { owner, repo } = context.repo;
+            const run = context.payload.workflow_run;
+            const issue_number = Number(process.env.BENCHMARK_PR_NUMBER);
+            if (!Number.isSafeInteger(issue_number) || issue_number < 1) throw new Error('Invalid PR number');
+            const { data: current } = await github.rest.pulls.get({
+              owner, repo, pull_number: issue_number
+            });
+            if (current.base?.repo?.full_name !== owner + '/' + repo ||
+                !policy.matchesRunToPr(run, current)) {
+              core.warning('PR is closed, retargeted, or changed; status not published.');
+              return;
+            }
+            const { data: liveRun } = await github.rest.actions.getWorkflowRun({ owner, repo, run_id: run.id });
+            if (liveRun.id !== run.id || liveRun.run_attempt !== run.run_attempt ||
+                liveRun.status !== 'completed' || liveRun.head_sha !== run.head_sha) {
+              core.warning('Source CI was superseded or restarted; status not published.');
+              return;
+            }
+            const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+              owner, repo, workflow_id: run.workflow_id, head_sha: run.head_sha,
+              event: 'pull_request', per_page: 100
+            });
+            if (!policy.isLatestCompletedRun(run, runs.filter(r => r.status === 'completed')) ||
+                runs.some(r => r.workflow_id === run.workflow_id && r.head_sha === run.head_sha &&
+                  r.event === 'pull_request' &&
+                  (r.run_number > run.run_number ||
+                    (r.run_number === run.run_number && r.run_attempt > run.run_attempt)))) {
+              core.warning('A newer CI run exists; status not published.');
+              return;
+            }
+            const marker = '<!-- benchmark-pr-quality-report -->';
+            const metadata = '<!-- benchmark-head-sha:' + current.head.sha + ' -->';
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number, per_page: 100
+            });
+            const previous = policy.findOwnedReportComment(comments, marker);
+            const body = [marker, metadata, '<!-- benchmark-state:error -->',
+              '## Benchmark · Report unavailable',
+              '⚠️ **Benchmark could not finish processing this CI run.**',
+              'Check the reporting workflow logs. The next CI run will retry on this same comment.',
+              '[View reporting workflow](https://github.com/' + owner + '/' + repo + '/actions/runs/' + context.runId + ')'
+            ].join('\n\n');
             if (previous) {
               await github.rest.issues.updateComment({ owner, repo, comment_id: previous.id, body });
             } else {
