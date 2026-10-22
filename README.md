@@ -75,7 +75,7 @@ To have the two files appear at artifact root, stage them there in CI or adapt t
 
 ## Reusable workflow integration (preview)
 
-For another repository, use the short [reusable reporter caller](examples/use-reusable-report.yml) rather than copying the full [publisher](examples/report-pr.yml). The consumer keeps a trusted `workflow_run` trigger on its default branch and grants `contents: read`, `actions: read`, `issues: write` and `pull-requests: write`. Configure `workflows: [CI]` to match the name of its existing pull-request CI workflow.
+For another repository, use the short [reusable reporter caller](examples/use-reusable-report.yml) rather than copying the full [publisher](examples/report-pr.yml). Follow the [external consumer and fork validation checklist](docs/consumer-validation.md) before production adoption. The consumer keeps a trusted `workflow_run` trigger on its default branch and grants `contents: read`, `actions: read`, `issues: write` and `pull-requests: write`. Configure `workflows: [CI]` to match the name of its existing pull-request CI workflow.
 
 The caller needs only:
 
@@ -83,12 +83,12 @@ The caller needs only:
 jobs:
   report:
     if: github.event.workflow_run.event == 'pull_request'
-    uses: affank1020/benchmark/.github/workflows/reusable-report.yml@REPLACE_WITH_REVIEWED_40_CHAR_RELEASE_SHA
+    uses: affank1020/benchmark/.github/workflows/reusable-report.yml@bb128d710834af8f763eb116bfd768af9d326d9b
     with:
       artifact_name: benchmark-ci
 ```
 
-**The placeholder must be replaced by an immutable reviewed 40-character commit SHA before the example can run.** Never deploy the privileged caller using `@main` or another moving ref. The reusable workflow independently checks out BENCHMARK's reviewed PR #4 merge (`81b6602198c38a74d6b539a484ff25b86c8e0cc8`) as its trusted reporter implementation. Advancing that pinned implementation is a deliberate compatibility/security change.
+**The caller is pinned to reviewed Benchmark PR #6 merge (`bb128d710834af8f763eb116bfd768af9d326d9b`)**, which includes the reusable workflow and its trusted reporter implementation. Never deploy the privileged caller using `@main` or another moving ref; review each pin upgrade explicitly. The reusable workflow independently checks out BENCHMARK's reviewed PR #4 merge (`81b6602198c38a74d6b539a484ff25b86c8e0cc8`) as its trusted reporter implementation. Advancing that pinned implementation is a deliberate compatibility/security change.
 
 The consumer's own CI must upload an artifact named `benchmark-ci` (or the chosen `artifact_name`) containing `lcov.info` and `junit.xml` at its root. It should upload on failure (`if: always()`); missing inputs are represented as unavailable, never fabricated. The reusable workflow runs in the **consumer repository's** security context, not on PR-supplied code. No external installation or personal access token is required when the repository and workflow permissions allow reusable calls.
 

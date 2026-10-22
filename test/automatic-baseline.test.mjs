@@ -46,8 +46,10 @@ const artifact = {
 
 async function choose({ pull = pr, candidates = [exact], artifacts = [artifact],
                         sourceRun = run, repoId = BASE_REPO_ID,
-                        artifactName = "benchmark-ci" } = {}) {
-  const workflow = await load("../.github/workflows/benchmark-report.yml");
+                        artifactName = "benchmark-ci",
+                        workflowPath = "../.github/workflows/benchmark-report.yml",
+                        consumerRepo = { owner: "affank1020", repo: "benchmark" } } = {}) {
+  const workflow = await load(workflowPath);
   let script = extractScript(workflow, "Find exact base-branch coverage artifact");
   // Inject the *actual* trusted pure policy without copying checkout files.
   script = script.replace(
@@ -78,7 +80,7 @@ async function choose({ pull = pr, candidates = [exact], artifacts = [artifact],
     paginate: (method, args) => method(args)
   };
   const context = {
-    repo: { owner: "affank1020", repo: "benchmark" },
+    repo: consumerRepo,
     payload: { workflow_run: sourceRun, repository: { id: repoId } }
   };
   const core = {
@@ -92,6 +94,42 @@ async function choose({ pull = pr, candidates = [exact], artifacts = [artifact],
   }, { matchesRunToPr });
   return { outputs, requests };
 }
+
+test("reusable workflow discovers exact-base CI in a separate consumer repository, including fork heads", async () => {
+  const consumerRepo = { owner: "fixture-org", repo: "consumer" };
+  const consumerArtifact = { ...artifact, id: 876, name: "consumer-quality" };
+  const consumerPr = {
+    ...pr,
+    base: { ...pr.base, repo: { id: BASE_REPO_ID, full_name: "fixture-org/consumer" } }
+  };
+  // Source repo 110 differs from consumer repo 220: this simulates a fork head.
+  const options = {
+    workflowPath: "../.github/workflows/reusable-report.yml",
+    consumerRepo, artifactName: "consumer-quality",
+    artifacts: [consumerArtifact], pull: consumerPr
+  };
+  const { outputs, requests } = await choose(options);
+  assert.equal(outputs.artifact_id, "876");
+  assert.equal(outputs.base_sha, "base-sha");
+  assert.equal(outputs.base_ref, "main");
+  assert.equal(outputs.run_id, "999");
+  const pullQuery = requests.find(x => x.api === "pulls.get").args;
+  assert.equal(pullQuery.owner, "fixture-org");
+  assert.equal(pullQuery.repo, "consumer");
+  const runQuery = requests.find(x => x.api === "listWorkflowRuns").args;
+  assert.equal(runQuery.owner, "fixture-org");
+  assert.equal(runQuery.repo, "consumer");
+  assert.equal(runQuery.head_sha, "base-sha");
+  assert.equal(runQuery.event, "push");
+  assert.equal(requests.find(x => x.api === "listWorkflowRunArtifacts").args.run_id, 999);
+
+  assert.deepEqual((await choose({
+    ...options, artifacts: [{ ...consumerArtifact, name: "another-artifact" }]
+  })).outputs, {}, "never accept an artifact with another producer name");
+  assert.deepEqual((await choose({
+    ...options, repoId: 1234
+  })).outputs, {}, "reject mismatched consumer repository IDs");
+});
 
 test("selects the exact successful base-branch push run and bounded artifact", async () => {
   const result = await choose();
