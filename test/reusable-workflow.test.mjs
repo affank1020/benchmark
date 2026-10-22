@@ -49,10 +49,8 @@ test("short consumer example is a trusted workflow_run caller, not PR code execu
   assert.match(consumer, /workflow_run:\s*\n\s*workflows: \[CI\]\s*\n\s*types: \[completed\]/);
   const ref = /uses: affank1020\/benchmark\/\.github\/workflows\/reusable-report\.yml@([^\s]+)/.exec(consumer)?.[1];
   assert.ok(ref, "Reusable workflow reference must be present");
-  assert.ok(
-    /^[a-f0-9]{40}$/.test(ref) || ref === "REPLACE_WITH_REVIEWED_40_CHAR_RELEASE_SHA",
-    "Caller must pin a reviewed immutable SHA or use a conspicuous non-runnable placeholder"
-  );
+  assert.match(ref, /^[a-f0-9]{40}$/, "Consumer caller must pin an immutable reviewed commit");
+  assert.equal(ref, "bb128d710834af8f763eb116bfd768af9d326d9b", "Consumer example should reference the reviewed PR #6 release");
   assert.notEqual(ref, "main");
   assert.match(consumer, /pull-requests: write/);
   assert.match(consumer, /if: github\.event\.workflow_run\.event == 'pull_request'/);

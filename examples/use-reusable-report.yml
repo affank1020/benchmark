@@ -1,7 +1,7 @@
 # Copy to .github/workflows/benchmark-report.yml in the consuming repository.
 # Replace [CI] with the exact name of your pull_request CI workflow.
-# Replace the placeholder ref with the 40-character SHA of a reviewed Benchmark
-# release containing .github/workflows/reusable-report.yml.
+# Pinned to reviewed Benchmark PR #6 merge. Deliberately upgrade only
+# after reviewing the new immutable release SHA.
 # Never use @main for a workflow receiving an issues/pull-requests write token.
 name: Benchmark PR Report
 
@@ -21,6 +21,6 @@ permissions:
 jobs:
   report:
     if: github.event.workflow_run.event == 'pull_request'
-    uses: affank1020/benchmark/.github/workflows/reusable-report.yml@REPLACE_WITH_REVIEWED_40_CHAR_RELEASE_SHA
+    uses: affank1020/benchmark/.github/workflows/reusable-report.yml@bb128d710834af8f763eb116bfd768af9d326d9b
     with:
       artifact_name: benchmark-ci
