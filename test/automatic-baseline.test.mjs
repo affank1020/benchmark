@@ -206,6 +206,41 @@ test("publisher only passes a downloaded baseline and rechecks its base SHA at p
   assert.doesNotMatch(installed, /checkout[\s\S]{0,100}ref: \$\{\{/);
 });
 
+function assertBaselineExtractsToExpectedRoot(workflow) {
+  const start = workflow.indexOf("      - name: Download exact base CI artifact");
+  const end = workflow.indexOf("      - name: Generate quality report", start);
+  assert.ok(start >= 0 && end > start, "Expected a separate ID-based baseline download step");
+  const download = workflow.slice(start, end);
+  assert.match(download, /uses: actions\/download-artifact@v4/);
+  assert.match(download, /artifact-ids: \$\{\{ steps\.baseline\.outputs\.artifact_id \}\}/);
+  // download-artifact v4 treats artifact-ids as a multi-artifact path, even
+  // for a single ID. Without merge-multiple it creates baseline/<name>/.
+  assert.match(download, /^\s+merge-multiple: true\s*$/m);
+  assert.match(download, /^\s+path: baseline\s*$/m);
+  assert.doesNotMatch(download, /^\s+(?:name|pattern):/m);
+  assert.match(workflow, /if \[ -f baseline\/lcov\.info \]; then/);
+  assert.match(workflow, /baseline_args=\(--baseline-coverage baseline\/lcov\.info\)/);
+}
+
+test("ID-based artifact download extracts at baseline/lcov.info in every publisher", async () => {
+  for (const path of [
+    "../.github/workflows/benchmark-report.yml",
+    "../examples/report-pr.yml",
+    "../.github/workflows/reusable-report.yml"
+  ]) {
+    const workflow = await load(path);
+    assertBaselineExtractsToExpectedRoot(workflow);
+    assert.throws(
+      () => assertBaselineExtractsToExpectedRoot(workflow.replace(
+        "          merge-multiple: true\n          path: baseline",
+        "          merge-multiple: false\n          path: baseline"
+      )),
+      /merge-multiple: true/,
+      path + " must detect the default nested extraction failure"
+    );
+  }
+});
+
 test("installed and public full workflow remain synchronized; reusable variant uses its input", async () => {
   const [installed, full, reusable] = await Promise.all([
     load("../.github/workflows/benchmark-report.yml"),
