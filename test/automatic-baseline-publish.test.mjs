@@ -153,3 +153,15 @@ test("a report without any selected baseline still publishes normal CI status", 
   assert.equal(writes.length, 1);
   assert.equal(requests.some(x => x.action === "listWorkflowRuns" && x.args.event === "push"), false);
 });
+
+
+test("newer queued or running CI attempt cannot let an old report overwrite a waiting/processing state", async () => {
+  for (const newer of [
+    { ...run, id: 11, run_number: 11, status: "queued", conclusion: null },
+    { ...run, id: 11, run_number: 11, status: "in_progress", conclusion: null },
+    { ...run, run_attempt: 2, status: "in_progress", conclusion: null }
+  ]) {
+    const { writes } = await attemptPublish({ prCandidates: [run, newer] });
+    assert.equal(writes.length, 0, JSON.stringify(newer));
+  }
+});
