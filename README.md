@@ -24,9 +24,9 @@ node --experimental-strip-types src/cli.mjs \
   --json benchmark.json
 ```
 
-## Coverage comparison (manual baseline)
+## Coverage comparison (manual and automatic baseline)
 
-Use `--baseline-coverage PATH` to compare current LCOV metrics against an explicitly supplied baseline LCOV file. This first step **does not automatically locate a base-branch report**.
+For local runs, use `--baseline-coverage PATH` to compare current LCOV metrics against an explicitly supplied baseline LCOV file. BENCHMARK's post-CI GitHub workflows can also **automatically discover the baseline** from a successful `push` run of the **same CI workflow** on the PR's exact current base-branch SHA. Both paths use the same bounded CLI LCOV parser.
 
 ```bash
 node --experimental-strip-types src/cli.mjs \
@@ -34,6 +34,10 @@ node --experimental-strip-types src/cli.mjs \
   --baseline-coverage ./coverage/base/lcov.info \
   --ci success --json benchmark.json
 ```
+
+Automatic baseline retrieval requires the consumer's `CI` workflow to run on both `pull_request` **and** `push` to the PR target branch (usually `main`), uploading a `benchmark-ci` artifact containing `lcov.info` from both runs. The publisher verifies the PR's current base repository, commit SHA and branch, searches only **completed push runs of the same workflow at that exact SHA**, and uses only a successful run's unexpired artifact under the existing 25 MiB compressed size limit. If the most recent matching run failed, no such run exists, or the artifact lacks coverage, no change is shown. It never substitutes an older base commit or runs tests itself. Base SHA is rechecked immediately before the comment is published, alongside existing head SHA and CI freshness checks.
+
+The workflow's trusted BENCHMARK implementation checkout is pinned to the reviewed PR #4 merge (`81b6602198c38a74d6b539a484ff25b86c8e0cc8`). This version understands `--baseline-coverage`, unlike the older pin. Changes to the pinned implementation remain explicit, reviewable upgrades. At present BENCHMARK's own CI uploads `junit.xml` but **not LCOV**, so its own PR reports still show coverage as unavailable. That is expected until coverage collection is configured.
 
 The Markdown report adds a baseline and change column. Change means **percentage points**, so a shift from 60% to 55% is **-5.00 pp**, not a 5% relative decline. The JSON includes `baselineCoverage` and a per-metric `coverageChange` object, whose values are percentage-point numbers or `null` if either denominator is unavailable. Zero measured lines/functions/branches must not be mistaken for 0% coverage.
 
@@ -50,7 +54,7 @@ No runtime or test dependencies.
 ## GitHub Actions integration
 
 1. In your existing PR-triggered **CI** workflow, upload the coverage and test files as one artifact named `benchmark-ci`, containing `lcov.info` and `junit.xml` at its root. Use `if: always()` so the artifact is uploaded even when the test job fails. If no results exist, Benchmark will show those metrics as unavailable.
-2. Copy [`examples/report-pr.yml`](examples/report-pr.yml) to `.github/workflows/benchmark-report.yml` in the consuming repository. Change `workflows: [CI]` to match your CI workflow's exact name. The full workflow example already pins its trusted Benchmark implementation checkout to the reviewed PR #2 merge commit (`c4aa9c6a76d71e57809954cbc17627dcb250ab56`). Keep this immutable SHA unless deliberately upgrading to another reviewed commit.
+2. Copy [`examples/report-pr.yml`](examples/report-pr.yml) to `.github/workflows/benchmark-report.yml` in the consuming repository. Change `workflows: [CI]` to match your CI workflow's exact name. The full workflow example pins its trusted BENCHMARK implementation checkout to the reviewed PR #4 merge commit (`81b6602198c38a74d6b539a484ff25b86c8e0cc8`). Keep this immutable SHA unless deliberately upgrading to another reviewed commit.
 3. The reporter runs **after** CI completes, so it can report failed workflows. It checks out trusted Benchmark code, never executes PR code with a write token, and uses `issues: write` and `pull-requests: write` to create or update one comment. Its PR resolution is SHA-checked; if it cannot confidently associate a run with the current PR head, it skips posting.
 
 Minimal artifact upload in an existing CI workflow:
@@ -84,7 +88,7 @@ jobs:
       artifact_name: benchmark-ci
 ```
 
-**The placeholder must be replaced by an immutable reviewed 40-character commit SHA before the example can run.** Never deploy the privileged caller using `@main` or another moving ref. The reusable workflow independently checks out Benchmark's reviewed PR #2 merge (`c4aa9c6a76d71e57809954cbc17627dcb250ab56`) as its trusted reporter implementation. Advancing that pinned implementation is a deliberate compatibility/security change.
+**The placeholder must be replaced by an immutable reviewed 40-character commit SHA before the example can run.** Never deploy the privileged caller using `@main` or another moving ref. The reusable workflow independently checks out BENCHMARK's reviewed PR #4 merge (`81b6602198c38a74d6b539a484ff25b86c8e0cc8`) as its trusted reporter implementation. Advancing that pinned implementation is a deliberate compatibility/security change.
 
 The consumer's own CI must upload an artifact named `benchmark-ci` (or the chosen `artifact_name`) containing `lcov.info` and `junit.xml` at its root. It should upload on failure (`if: always()`); missing inputs are represented as unavailable, never fabricated. The reusable workflow runs in the **consumer repository's** security context, not on PR-supplied code. No external installation or personal access token is required when the repository and workflow permissions allow reusable calls.
 
