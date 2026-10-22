@@ -83,12 +83,12 @@ The caller needs only:
 jobs:
   report:
     if: github.event.workflow_run.event == 'pull_request'
-    uses: affank1020/benchmark/.github/workflows/reusable-report.yml@bb128d710834af8f763eb116bfd768af9d326d9b
+    uses: affank1020/benchmark/.github/workflows/reusable-report.yml@eb53a1881039fcd53ecce821f327bd0b6990acb8
     with:
       artifact_name: benchmark-ci
 ```
 
-**The caller is pinned to reviewed Benchmark PR #6 merge (`bb128d710834af8f763eb116bfd768af9d326d9b`)**, which includes the reusable workflow and its trusted reporter implementation. Never deploy the privileged caller using `@main` or another moving ref; review each pin upgrade explicitly. The reusable workflow independently checks out BENCHMARK's reviewed PR #4 merge (`81b6602198c38a74d6b539a484ff25b86c8e0cc8`) as its trusted reporter implementation. Advancing that pinned implementation is a deliberate compatibility/security change.
+**The caller is pinned to reviewed Benchmark PR #9 merge (`eb53a1881039fcd53ecce821f327bd0b6990acb8`)**, which includes lifecycle improvements and independent JUnit/LCOV artifact selection. Never deploy the privileged caller using `@main` or another moving ref; review each pin upgrade explicitly. The reusable workflow independently checks out BENCHMARK's reviewed PR #4 merge (`81b6602198c38a74d6b539a484ff25b86c8e0cc8`) as its trusted reporter implementation. Advancing that pinned implementation is a deliberate compatibility/security change.
 
 The consumer's own CI must upload an artifact named `benchmark-ci` (or the chosen `artifact_name`) containing `lcov.info` and `junit.xml` at its root. It should upload on failure (`if: always()`); missing inputs are represented as unavailable, never fabricated. The reusable workflow runs in the **consumer repository's** security context, not on PR-supplied code. No external installation or personal access token is required when the repository and workflow permissions allow reusable calls.
 
@@ -130,6 +130,16 @@ The same bot-owned comment moves through **Waiting for CI results → Processing
 For consumers, copy `examples/lifecycle-pr.yml` to `.github/workflows/benchmark-lifecycle.yml` on the default branch and set `workflows: [CI]` to the exact existing CI workflow name. Deploy the enhanced post-CI publisher from a **reviewed immutable release**, not `@main`. Earlier consumers pinned to PR #6 still publish final reports but lack intermediate states.
 
 **Live verification:** the superseded `pull_request_target` workflow failed on Benchmark PRs #9 and #10. The CI-start replacement cannot validate itself while unmerged. After merging, create/update a PR and verify Waiting → Processing → Final edits **the same comment ID**. Test forks and reruns, and record Actions run IDs, effective permissions and any 403 before claiming this is resolved.
+
+## Repeatable GitHub release packaging
+
+Benchmark can publish a reviewable, versioned GitHub Release after a maintainer deliberately pushes an **annotated tag** matching the repository's `package.json` version. See [the release procedure](docs/releasing.md). The release workflow only responds to tags; ordinary branches and PRs do **not** publish anything.
+
+Every release generates a minimal dependency-free CLI archive, two ready-to-copy consumer workflows, `release-manifest.json` with the immutable commit SHA and asset hashes, and `SHA256SUMS`. The consumer workflows are generated with their `workflow_call` reference and trusted early-status matcher pinned to **the exact tagged commit**; no moving `@main` references are introduced. The archive contains the CLI source files, not PR workflows or test fixtures.
+
+Release publishing verifies that the tag is annotated, resolves to the checked-out commit, matches `package.json`, and is reachable from `main`. The GitHub CLI is told to **verify the existing tag** rather than silently create it. The release assets and checksums provide integrity checks, but checksums alone do not authenticate the release source; consumers should obtain them from the repository's official GitHub Release and review the pinned commit.
+
+**No official GitHub Release is created by this pull request.** The first tag and any consumer upgrades remain deliberate follow-up actions after independent review/merge.
 
 ## Security model
 

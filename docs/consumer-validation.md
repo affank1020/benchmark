@@ -6,10 +6,14 @@ Benchmark's reusable reporter runs in the **consumer repository's trusted defaul
 
 1. Choose a **separate** test repository under your control with CI triggered by both `push` on `main` and `pull_request`. Avoid changing a production repo's privileged workflows without reviewing the proposed integration.
 2. Adapt the existing test execution to emit **both** `junit.xml` and `lcov.info` at the root of a `benchmark-ci` artifact; use `if: always()` to upload available inputs after failures. Benchmark does not rerun tests itself.
-3. Copy [`examples/use-reusable-report.yml`](../examples/use-reusable-report.yml) into `.github/workflows/benchmark-report.yml` in the consumer. The reusable workflow reference is pinned to reviewed Benchmark PR #6 merge (`bb128d710834af8f763eb116bfd768af9d326d9b`). Set the `workflows:` filter to the exact existing CI workflow name; update `artifact_name` if required.
+3. Copy [`examples/use-reusable-report.yml`](../examples/use-reusable-report.yml) into `.github/workflows/benchmark-report.yml` in the consumer. The example reusable workflow reference is pinned to reviewed Benchmark PR #9 merge (`eb53a1881039fcd53ecce821f327bd0b6990acb8`). Set the `workflows:` filter to the exact existing CI workflow name; update `artifact_name` if required.
 4. Review the trusted caller's `contents: read`, `actions: read`, `issues: write` and `pull-requests: write` permissions. If organization settings disallow the reusable workflow, explicitly authorize the reviewed SHA instead of relaxing branch protections.
 5. Merge the consumer setup only after its own independent review. GitHub only enables `workflow_run` triggers present on the consumer's **default branch**, not an unmerged feature branch.
 6. Verify that the consumer's exact current `main` SHA has a **successful push CI** with a single nonexpired `benchmark-ci` artifact containing `lcov.info`. A PR targeting an older baseline legitimately has no delta.
+
+## Released consumer workflows
+
+After a reviewed Benchmark release, download `benchmark-report.yml` and `benchmark-lifecycle.yml` from that release and inspect their **40-character source and trusted matcher SHAs**. Each release also provides a SHA256 manifest for checking downloaded assets. Match the `workflows: [CI]` name to the consumer's existing read-only CI workflow, and keep the publishing workflows on its default branch. The release does not deploy anything automatically to consumers; see [release procedure](releasing.md).
 
 ## Multi-job CI inputs
 
