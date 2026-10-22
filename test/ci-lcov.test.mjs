@@ -45,7 +45,15 @@ test("Node 22 native dual reporters emit LCOV that Benchmark can parse", async (
       "--test-reporter=lcov",
       "--test-reporter-destination=" + lcov,
       "test/core.test.mjs"
-    ], { cwd: root, encoding: "utf8", timeout: 30_000 });
+    ], {
+      cwd: root, encoding: "utf8", timeout: 30_000,
+      // The parent CI test runner sets NODE_TEST_CONTEXT=child-v8. If it
+      // leaks into this subprocess, Node silently skips the nested tests.
+      // Keep the smoke invocation an independent top-level test run.
+      env: Object.fromEntries(Object.entries(process.env).filter(
+        ([key]) => key !== "NODE_TEST_CONTEXT" && key !== "NODE_V8_COVERAGE"
+      ))
+    });
     assert.equal(result.error, undefined, String(result.error));
     assert.equal(result.status, 0, result.stdout + "\n" + result.stderr);
 
