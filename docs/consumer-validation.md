@@ -13,6 +13,9 @@ Benchmark's reusable reporter runs in the **consumer repository's trusted defaul
 
 ## Consumer acceptance checks
 
+The optional early-comment workflow listens to the existing read-only CI workflow's `workflow_run` `requested` and `in_progress` events, using reviewed, pinned default-branch code. Waiting appears when CI starts, not necessarily at PR creation; `pull_request_target` is not used. The existing completed-workflow reporter remains the final authority.
+
+
 On a new PR against that instrumented `main`, verify:
 
 - Read-only PR CI uploads the expected JUnit + LCOV artifact using the existing test execution, on success and where possible on failure.
