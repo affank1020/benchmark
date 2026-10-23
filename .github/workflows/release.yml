@@ -1,48 +1,54 @@
-# GitHub Release only after a reviewed commit is deliberately tagged.
-# Does not run on ordinary PRs, pushes to main or arbitrary branches.
+# Release existing reviewed annotated tags. Never create or move a tag.
+# Manual dispatch is for recovering a tag whose previous publish run failed.
 name: Publish Benchmark Release
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version_tag:
+        description: "Existing annotated stable version tag (e.g. v0.1.0)"
+        required: true
+        type: string
 
 permissions:
   contents: write
 
+# Prevent a tag-push publication and manual recovery for the same tag racing.
 concurrency:
-  group: benchmark-release-${{ github.ref }}
+  group: benchmark-release-${{ github.event_name == 'workflow_dispatch' && inputs.version_tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
   release:
+    # An arbitrary dispatch ref must never run with a privileged release token.
+    if: >-
+      (github.event_name == 'push' && github.ref_type == 'tag') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout tagged source without persisting credentials
+      - name: Checkout trusted release policy from main
         uses: actions/checkout@v4
         with:
+          # A tag-event checkout may replace its annotated tag with a
+          # lightweight ref for the triggering SHA. Bootstrap from main.
+          ref: main
           fetch-depth: 0
           persist-credentials: false
       - name: Set up Node 22
         uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Verify reviewed, annotated version tag on main
+      - name: Verify existing annotated tag and checkout its exact commit
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.version_tag || github.ref_name }}
         shell: bash
         run: |
-          set -euo pipefail
-          [[ "$GITHUB_REF_TYPE" == "tag" ]]
-          [[ "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
-          # Annotated tags make the release a deliberate maintainer action.
-          [[ "$(git cat-file -t "refs/tags/$TAG")" == "tag" ]]
-          [[ "$TAG" == "v$(node -p "require('./package.json').version")" ]]
-          [[ "$(git rev-parse HEAD)" == "$(git rev-parse "refs/tags/$TAG^{commit}")" ]]
-          git fetch --no-tags origin main:refs/remotes/origin/main
-          git merge-base --is-ancestor HEAD refs/remotes/origin/main
+          bash scripts/verify-release-tag.sh "$TAG"
       - name: Package immutable CLI and consumer examples
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.version_tag || github.ref_name }}
         run: |
           set -euo pipefail
           node scripts/package-release.mjs --version "$TAG" --out-dir dist
@@ -52,7 +58,7 @@ jobs:
       - name: Create release for the existing tag only
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.version_tag || github.ref_name }}
         shell: bash
         run: |
           set -euo pipefail

@@ -263,15 +263,19 @@ test("release packaging follows a committed package version bump without rewriti
   });
 });
 
-test("release workflow publishes only an annotated tag reachable from main", async () => {
+test("release workflow only publishes existing annotated tags from reviewed main", async () => {
   const yaml = await readFile(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
   assert.match(yaml, /push:\s*\n\s*tags: \["v\*"\]/);
-  assert.doesNotMatch(yaml, /pull_request_target:|workflow_run:|workflow_dispatch:/);
+  assert.match(yaml, /workflow_dispatch:\s*\n\s*inputs:\s*\n\s*version_tag:/);
+  assert.doesNotMatch(yaml, /pull_request_target:|workflow_run:/);
   assert.match(yaml, /contents: write/);
   assert.match(yaml, /persist-credentials: false/);
-  assert.match(yaml, /git cat-file -t/);
-  assert.match(yaml, /git merge-base --is-ancestor HEAD refs\/remotes\/origin\/main/);
-  assert.match(yaml, /git rev-parse "refs\/tags\/\$TAG\^\{commit\}"/);
+  assert.match(yaml, /ref: main\n/);
+  assert.match(yaml, /github\.ref == 'refs\/heads\/main'/);
+  assert.match(yaml, /github\.event_name == 'push' && github\.ref_type == 'tag'/);
+  assert.match(yaml, /github\.event_name == 'workflow_dispatch' && inputs\.version_tag \|\| github\.ref_name/);
+  assert.match(yaml, /group: benchmark-release-\$\{\{/);
+  assert.match(yaml, /bash scripts\/verify-release-tag\.sh "\$TAG"/);
   assert.match(yaml, /package-release\.mjs --version "\$TAG" --out-dir dist/);
   assert.match(yaml, /sha256sum --check SHA256SUMS/);
   assert.match(yaml, /gh release create "\$TAG"/);
