@@ -1,0 +1,68 @@
+# GitHub Release only after a reviewed commit is deliberately tagged.
+# Does not run on ordinary PRs, pushes to main or arbitrary branches.
+name: Publish Benchmark Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: benchmark-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tagged source without persisting credentials
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify reviewed, annotated version tag on main
+        env:
+          TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF_TYPE" == "tag" ]]
+          [[ "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          # Annotated tags make the release a deliberate maintainer action.
+          [[ "$(git cat-file -t "refs/tags/$TAG")" == "tag" ]]
+          [[ "$TAG" == "v$(node -p "require('./package.json').version")" ]]
+          [[ "$(git rev-parse HEAD)" == "$(git rev-parse "refs/tags/$TAG^{commit}")" ]]
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          git merge-base --is-ancestor HEAD refs/remotes/origin/main
+      - name: Package immutable CLI and consumer examples
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          node scripts/package-release.mjs --version "$TAG" --out-dir dist
+          cd dist
+          sha256sum --check SHA256SUMS
+          tar -tzf "benchmark-cli-$TAG.tar.gz" | grep "/src/cli.mjs$"
+      - name: Create release for the existing tag only
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" \
+            "dist/benchmark-cli-$TAG.tar.gz" \
+            dist/benchmark-report.yml \
+            dist/benchmark-lifecycle.yml \
+            dist/release-manifest.json \
+            dist/SHA256SUMS \
+            --verify-tag \
+            --fail-on-no-commits \
+            --title "Benchmark $TAG" \
+            --generate-notes
