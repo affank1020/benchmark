@@ -17,6 +17,18 @@ const pack = (checkout, version, out) => spawnSync(process.execPath, [
   "scripts/package-release.mjs", "--version", version, "--out-dir", out
 ], { cwd: checkout, encoding: "utf8" });
 
+// Node's test runner sets NODE_TEST_CONTEXT; inheriting it causes a child
+// "node --test" to silently SKIP test files and report exit 0. Remove it so
+// this actually exercises the packaging test in the dirty fixture.
+const runPositiveTestIn = checkout => {
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
+  return spawnSync(process.execPath, [
+    "--test", "--test-name-pattern=^release packaging emits",
+    "test/release-package.test.mjs"
+  ], { cwd: checkout, encoding: "utf8", env });
+};
+
 const nextPatchVersion = version => {
   const [major, minor, patch] = version.split(".").map(Number);
   assert.ok([major, minor, patch].every(Number.isSafeInteger), "Expected a stable SemVer version");
@@ -188,38 +200,39 @@ test("production packager rejects dirty sources while packaging tests still pass
     // tree. Its own clean fixture must allow it to pass without committing or
     // stashing the contributor's changes. Select only the positive test so
     // this does not recursively run the full test suite.
-    const nested = spawnSync(process.execPath, [
-      "--test", "--test-name-pattern=^release packaging emits",
-      "test/release-package.test.mjs"
-    ], { cwd: checkout, encoding: "utf8" });
+    const nested = runPositiveTestIn(checkout);
     assert.equal(nested.status, 0, nested.stderr + "\n" + nested.stdout);
+    assert.match(nested.stdout, /^# pass 1$/m,
+      "The nested positive test must actually execute (not be silently skipped)");
   });
 });
 
 test("unstaged deletion of an unrelated tracked file does not break packaging tests", async () => {
   await fixture(async ({ checkout }) => {
     await unlink(join(checkout, "README.md"));
-    assert.match(git(checkout, "status", "--porcelain", "--untracked-files=no"),
-      / D README\.md/, "Deletion must remain unstaged in the original checkout");
-    const nested = spawnSync(process.execPath, [
-      "--test", "--test-name-pattern=^release packaging emits",
-      "test/release-package.test.mjs"
-    ], { cwd: checkout, encoding: "utf8" });
+    assert.equal(git(checkout, "diff", "--name-only", "--", "README.md"),
+      "README.md", "Deletion must remain unstaged in the original checkout");
+    assert.equal(git(checkout, "diff", "--cached", "--name-only", "--", "README.md"),
+      "", "The deleted file must not be staged");
+    const nested = runPositiveTestIn(checkout);
     assert.equal(nested.status, 0, nested.stderr + "\n" + nested.stdout);
+    assert.match(nested.stdout, /^# pass 1$/m,
+      "The nested positive test must actually execute (not be silently skipped)");
     // Running the nested fixture must not restore or stage the deleted file.
-    assert.match(git(checkout, "status", "--porcelain", "--untracked-files=no"),
-      / D README\.md/);
+    assert.equal(git(checkout, "diff", "--name-only", "--", "README.md"),
+      "README.md");
+    assert.equal(git(checkout, "diff", "--cached", "--name-only", "--", "README.md"),
+      "");
   });
 });
 
 test("a deleted required release input fails with a useful fixture diagnostic", async () => {
   await fixture(async ({ checkout }) => {
     await unlink(join(checkout, "docs/cli-archive.md"));
-    const nested = spawnSync(process.execPath, [
-      "--test", "--test-name-pattern=^release packaging emits",
-      "test/release-package.test.mjs"
-    ], { cwd: checkout, encoding: "utf8" });
-    assert.notEqual(nested.status, 0);
+    const nested = runPositiveTestIn(checkout);
+    assert.notEqual(nested.status, 0, nested.stderr + "\n" + nested.stdout);
+    assert.match(nested.stdout, /^# fail 1$/m,
+      "The missing-input test must execute and fail");
     assert.match(nested.stderr + "\n" + nested.stdout,
       /Missing required packaging fixture input: docs\/cli-archive\.md/);
   });
