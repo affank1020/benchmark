@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { cp, lstat, mkdir, mkdtemp, readFile, readdir, rm, unlink, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -34,14 +34,38 @@ const fixture = async fn => {
     const paths = [...new Set(execFileSync("git", [
       "ls-files", "--cached", "--others", "--exclude-standard", "-z"
     ], { cwd: root }).toString("utf8").split("\0").filter(Boolean))];
-    assert.ok(paths.includes("scripts/package-release.mjs"));
-    assert.ok(paths.includes("docs/cli-archive.md"));
+    const required = [
+      "LICENSE", "package.json", "scripts/package-release.mjs",
+      "examples/use-reusable-report.yml", "examples/lifecycle-pr.yml",
+      "docs/cli-archive.md", "src/cli.mjs", "src/core.ts",
+      "src/read-input.mjs", "src/publish-policy.mjs",
+      "test/release-package.test.mjs"
+    ];
+    const copied = new Set();
     for (const path of paths) {
       assert.ok(!isAbsolute(path) && !path.split("/").includes("..") &&
         !path.split("/").includes(".git"), "Unsafe checkout path: " + path);
+      const source = join(root, path);
+      // Git's index includes tracked paths that have been deleted locally
+      // (even before the deletion is staged). Snapshot current working files.
+      let entry;
+      try {
+        entry = await lstat(source);
+      } catch (error) {
+        if (error.code === "ENOENT") continue;
+        throw error;
+      }
+      assert.ok(entry.isFile() || entry.isSymbolicLink(),
+        "Unexpected non-file in packaging fixture: " + path);
       const destination = join(checkout, path);
       await mkdir(dirname(destination), { recursive: true });
-      await cp(join(root, path), destination, { dereference: false });
+      await cp(source, destination, { dereference: false });
+      copied.add(path);
+    }
+    // A locally deleted unrelated file must not break the tests, but a
+    // missing source needed to build the release must fail explicitly.
+    for (const path of required) {
+      assert.ok(copied.has(path), "Missing required packaging fixture input: " + path);
     }
     git(checkout, "init", "-q");
     git(checkout, "add", "-A");
@@ -169,6 +193,35 @@ test("production packager rejects dirty sources while packaging tests still pass
       "test/release-package.test.mjs"
     ], { cwd: checkout, encoding: "utf8" });
     assert.equal(nested.status, 0, nested.stderr + "\n" + nested.stdout);
+  });
+});
+
+test("unstaged deletion of an unrelated tracked file does not break packaging tests", async () => {
+  await fixture(async ({ checkout }) => {
+    await unlink(join(checkout, "README.md"));
+    assert.match(git(checkout, "status", "--porcelain", "--untracked-files=no"),
+      / D README\.md/, "Deletion must remain unstaged in the original checkout");
+    const nested = spawnSync(process.execPath, [
+      "--test", "--test-name-pattern=^release packaging emits",
+      "test/release-package.test.mjs"
+    ], { cwd: checkout, encoding: "utf8" });
+    assert.equal(nested.status, 0, nested.stderr + "\n" + nested.stdout);
+    // Running the nested fixture must not restore or stage the deleted file.
+    assert.match(git(checkout, "status", "--porcelain", "--untracked-files=no"),
+      / D README\.md/);
+  });
+});
+
+test("a deleted required release input fails with a useful fixture diagnostic", async () => {
+  await fixture(async ({ checkout }) => {
+    await unlink(join(checkout, "docs/cli-archive.md"));
+    const nested = spawnSync(process.execPath, [
+      "--test", "--test-name-pattern=^release packaging emits",
+      "test/release-package.test.mjs"
+    ], { cwd: checkout, encoding: "utf8" });
+    assert.notEqual(nested.status, 0);
+    assert.match(nested.stderr + "\n" + nested.stdout,
+      /Missing required packaging fixture input: docs\/cli-archive\.md/);
   });
 });
 
