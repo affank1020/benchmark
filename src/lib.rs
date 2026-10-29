@@ -83,11 +83,16 @@ fn field_index(line: &str) -> Option<(usize, &str)> {
     let (name, value) = line.split_once(':')?;
     // Mirror the legacy [A-Z][A-Z0-9_]* summary field syntax.
     if !name.starts_with(|c: char| c.is_ascii_uppercase())
-        || !name.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
+        || !name
+            .bytes()
+            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
     {
         return None;
     }
-    FIELDS.iter().position(|field| *field == name).map(|i| (i, value))
+    FIELDS
+        .iter()
+        .position(|field| *field == name)
+        .map(|i| (i, value))
 }
 
 fn malformed_summary(line: &str) -> bool {
@@ -169,8 +174,7 @@ fn delta(current: Option<&Metric>, baseline: &Metric) -> Option<f64> {
         return None;
     }
     let value = js_round(
-        (current.hit as f64 / current.found as f64
-            - baseline.hit as f64 / baseline.found as f64)
+        (current.hit as f64 / current.found as f64 - baseline.hit as f64 / baseline.found as f64)
             * 10000.0,
     ) / 100.0;
     // Avoid displaying a negative zero in JSON/Markdown consumers.
