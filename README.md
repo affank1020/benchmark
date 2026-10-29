@@ -147,4 +147,19 @@ The reporter uses the trusted default-branch workflow via `workflow_run`, and it
 
 This is a first milestone, **not yet a stable or published reusable action**. Next: robust multi-job artifact discovery, historical baselines and coverage-delta comparisons, reusable action packaging, and integration tests for fork PRs.
 
+## Experimental Rust migration
+
+The Rust library in `src/lib.rs` currently ports only LCOV aggregate parsing and percentage-point baseline comparisons. This is an **additive, non-production** first slice of [migration issue #15](https://github.com/affank1020/benchmark/issues/15); it is not yet a Rust CLI, and the deployed Node reporter and trusted GitHub workflows are intentionally unchanged.
+
+Run the pinned Rust checks with:
+
+```bash
+rustup toolchain install 1.85.1 --profile minimal --component clippy --component rustfmt
+cargo +1.85.1 fmt --all -- --check
+cargo +1.85.1 clippy --locked --all-targets -- -D warnings
+cargo +1.85.1 test --locked --all-targets
+```
+
+Rust checks run in a separate GitHub Actions CI job alongside the existing Node tests. Next: port JUnit/Jest, complete the Rust CLI and golden output comparison before switching privileged report workflows. Local development may use the Atlas Linux workspace, but its Node currently has no `workspace.dev` execution capability; hosted CI must validate builds until that capability is available.
+
 License: MIT.
