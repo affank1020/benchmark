@@ -3,7 +3,7 @@
 // publish a GitHub Release, create tags or modify consumer workflows.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -40,10 +40,13 @@ const git = (...args) => execFileSync("git", args, {
 
 async function main() {
   const args = process.argv.slice(2);
-  if (args.length !== 4 || args[0] !== "--out-dir" || args[2] !== "--commit") {
-    throw new Error("Usage: package-rust-candidate.mjs --out-dir EMPTY_DIR --commit EXACT_HEAD_SHA");
+  if (![4, 6].includes(args.length) || args[0] !== "--out-dir" ||
+      args[2] !== "--commit" || (args.length === 6 &&
+      (args[4] !== "--kind" || args[5] !== "rust-release"))) {
+    throw new Error("Usage: package-rust-candidate.mjs --out-dir EMPTY_DIR --commit EXACT_HEAD_SHA [--kind rust-release]");
   }
   const [, outArg, , commit] = args;
+  const kind = args.length === 6 ? "rust-release" : "unreleased-ci-candidate";
   if (!SHA.test(commit) || git("rev-parse", "--verify", "HEAD^{commit}") !== commit) {
     throw new Error("Candidate commit must match the current exact checkout HEAD");
   }
@@ -53,18 +56,35 @@ async function main() {
 
   const platform = process.platform;
   const arch = process.arch;
-  const binaryPath = join(root, "target", "release", "benchmark");
-  const info = await stat(binaryPath);
-  if (!info.isFile() || info.size === 0 || info.size > MAX_BINARY) {
-    throw new Error("Binary missing or outside allowed size");
-  }
-  const binary = await readFile(binaryPath);
-  validateNativeBinary(binary, platform, arch);
-
   const out = resolve(outArg);
   await mkdir(out, { recursive: true });
   if ((await readdir(out)).length !== 0) {
     throw new Error("Candidate output directory must be empty");
+  }
+
+  // Always compile the exact clean checkout into a NEW isolated Cargo target
+  // directory. Never package target/release/benchmark: it may have been built
+  // from another Git revision and is ignored by Git.
+  const build = await mkdtemp(join(tmpdir(), "benchmark-rust-source-build-"));
+  let binary;
+  try {
+    execFileSync("cargo", [
+      "+1.85.1", "build", "--locked", "--release", "--bin", "benchmark",
+      "--target-dir", build
+    ], { cwd: root, stdio: "inherit" });
+    if (git("rev-parse", "HEAD") !== commit ||
+        git("status", "--porcelain", "--untracked-files=no")) {
+      throw new Error("Candidate checkout changed during the clean build");
+    }
+    const binaryPath = join(build, "release", "benchmark");
+    const info = await stat(binaryPath);
+    if (!info.isFile() || info.size === 0 || info.size > MAX_BINARY) {
+      throw new Error("Fresh binary missing or outside allowed size");
+    }
+    binary = await readFile(binaryPath);
+    validateNativeBinary(binary, platform, arch);
+  } finally {
+    await rm(build, { recursive: true, force: true });
   }
   const target = platform + "-" + arch;
   const stem = "benchmark-rust-" + commit + "-" + target;
@@ -73,7 +93,7 @@ async function main() {
   const pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
   const manifest = {
     schemaVersion: 1,
-    kind: "unreleased-ci-candidate",
+    kind,
     version: "v" + pkg.version,
     commit,
     target,
@@ -85,15 +105,17 @@ async function main() {
   try {
     const dir = join(staging, "benchmark-rust");
     await mkdir(dir);
-    await copyFile(binaryPath, join(dir, "benchmark"));
+    await writeFile(join(dir, "benchmark"), binary, { flag: "wx", mode: 0o755 });
     await writeFile(join(dir, "manifest.json"), json, { flag: "wx" });
     await writeFile(join(dir, "README.md"), [
-      "# Benchmark Rust CI candidate",
+      kind === "rust-release" ? "# Benchmark Rust release asset" : "# Benchmark Rust CI candidate",
       "",
-      "This is a **non-release**, built from a reviewable Git commit.",
+      kind === "rust-release" ?
+        "Official release asset, built only after validating the reviewed annotated Git tag." :
+        "This is a **non-release**, built from a reviewable Git commit.",
       "The executable reports on existing LCOV/JUnit/Jest data; it does not run tests.",
       "Verify the archive SHA256 and manifest commit/target before execution.",
-      "Official GitHub Release publication and consumer rollout are separate decisions.",
+      "Use the checksum, commit and architecture validation before execution.",
       ""
     ].join("\n"), { flag: "wx" });
     // A fixed directory name and fixed file selection prevent path traversal.

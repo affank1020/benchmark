@@ -52,6 +52,11 @@ jobs:
           grep -F -q '<!-- benchmark-pr-quality-report -->' "$RUNNER_TEMP/rust-native-smoke.md"
           grep -F -q '**CI:** ❌ Failed (failure)' "$RUNNER_TEMP/rust-native-smoke.md"
           grep -F -q 'Coverage artifact missing or invalid' "$RUNNER_TEMP/rust-native-smoke.md"
+      # Regression for review finding #23: target/ is ignored by Git, so a
+      # previously compiled executable must NEVER be the candidate payload.
+      - name: Prove candidate packaging ignores a stale target binary
+        shell: bash
+        run: printf 'deliberately stale previous build' > target/release/benchmark
       - name: Package verified commit as an unreleased candidate
         shell: bash
         run: |

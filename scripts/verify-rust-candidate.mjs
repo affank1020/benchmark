@@ -12,13 +12,26 @@ const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
 
 async function main() {
   const args = process.argv.slice(2);
-  if (args.length !== 4 || args[0] !== "--out-dir" || args[2] !== "--commit" ||
-      !/^[0-9a-f]{40}$/.test(args[3])) {
-    throw new Error("Usage: verify-rust-candidate.mjs --out-dir DIR --commit EXACT_SHA");
+  if (![4, 6, 8].includes(args.length) || args[0] !== "--out-dir" ||
+      args[2] !== "--commit" || !/^[0-9a-f]{40}$/.test(args[3])) {
+    throw new Error("Usage: verify-rust-candidate.mjs --out-dir DIR --commit EXACT_SHA [--target TARGET] [--kind rust-release]");
+  }
+  const options = new Map();
+  for (let index = 4; index < args.length; index += 2) {
+    const flag = args[index];
+    if (!["--target", "--kind"].includes(flag) || options.has(flag)) {
+      throw new Error("Unsupported or duplicate candidate verification option");
+    }
+    options.set(flag, args[index + 1]);
+  }
+  if (options.has("--kind") && options.get("--kind") !== "rust-release") {
+    throw new Error("Unsupported candidate kind");
   }
   const out = resolve(args[1]);
   const commit = args[3];
-  const target = process.platform + "-" + process.arch;
+  // Cross-OS verification is needed by the trusted Linux publishing job.
+  const target = options.get("--target") ?? process.platform + "-" + process.arch;
+  const kind = options.get("--kind") ?? "unreleased-ci-candidate";
   if (!["linux-x64", "linux-arm64", "darwin-x64", "darwin-arm64"].includes(target)) {
     throw new Error("Unsupported candidate platform");
   }
@@ -48,7 +61,7 @@ async function main() {
   const manifestBytes = await readFile(join(out, metadataName));
   const manifest = JSON.parse(manifestBytes.toString("utf8"));
   if (manifest.schemaVersion !== 1 ||
-      manifest.kind !== "unreleased-ci-candidate" ||
+      manifest.kind !== kind ||
       manifest.commit !== commit || manifest.target !== target ||
       manifest.rustToolchain !== "1.85.1" ||
       !/^v\d+\.\d+\.\d+$/.test(manifest.version)) {
@@ -66,6 +79,26 @@ async function main() {
   if (JSON.stringify(entries) !== JSON.stringify(expected)) {
     throw new Error("Unexpected archive contents");
   }
+  // Names alone are insufficient: a symlink can have the correct filename.
+  // Check tar entry types and require an executable *regular file* for CLI.
+  // GNU tar and BSD tar both start verbose entries with the 10 mode chars.
+  const members = execFileSync("tar", ["-tvzf", archive], { encoding: "utf8" })
+    .trim().split("\n");
+  if (members.length !== expected.length) {
+    throw new Error("Unexpected tar member count");
+  }
+  const archiveNames = execFileSync("tar", ["-tzf", archive], { encoding: "utf8" })
+    .trim().split("\n");
+  for (let index = 0; index < archiveNames.length; index++) {
+    const name = archiveNames[index].replace(/\/$/, "");
+    const detailed = members[index];
+    const mode = detailed.slice(0, 10);
+    if (!detailed.endsWith(" " + archiveNames[index]) ||
+        (name === "benchmark-rust" ? mode[0] !== "d" : mode[0] !== "-") ||
+        (name === "benchmark-rust/benchmark" && !["x", "s"].includes(mode[3]))) {
+      throw new Error("Invalid archive member type or executable permissions: " + name);
+    }
+  }
   const tarFile = path => execFileSync("tar", ["-xOf", archive, path], {
     maxBuffer: 100 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"]
   });
@@ -73,7 +106,8 @@ async function main() {
     throw new Error("Archive manifest differs from detached manifest");
   }
   const binary = tarFile("benchmark-rust/benchmark");
-  validateNativeBinary(binary, process.platform, process.arch);
+  const [platform, arch] = target.split("-");
+  validateNativeBinary(binary, platform, arch);
   if (!manifest.binary || manifest.binary.name !== "benchmark" ||
       manifest.binary.bytes !== binary.length ||
       manifest.binary.sha256 !== sha256(binary)) {

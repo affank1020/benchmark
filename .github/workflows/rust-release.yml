@@ -1,0 +1,193 @@
+# Manual, explicit promotion of reviewed *annotated* tags only.
+# Never runs on PR/branch/tag pushes, never creates or moves a version tag,
+# and never executes downloaded CI artifacts with a write token.
+name: Publish reviewed Rust binaries
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_tag:
+        description: "Existing reviewed annotated tag, e.g. v0.2.0 (never v0.1.0)"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: benchmark-rust-release-${{ inputs.version_tag }}
+  cancel-in-progress: false
+
+jobs:
+  verify-tag:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    outputs:
+      source_sha: ${{ steps.identity.outputs.source_sha }}
+    steps:
+      - name: Checkout trusted release policy from main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify existing annotated tag against reviewed main
+        id: identity
+        env:
+          TAG: ${{ inputs.version_tag }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # v0.1.0 is the preserved Node-only release, not a Rust release.
+          test "$TAG" != v0.1.0
+          bash scripts/verify-release-tag.sh "$TAG"
+          test -f scripts/package-rust-candidate.mjs
+          test -f scripts/verify-rust-candidate.mjs
+          # A Rust promotion augments an existing published Node release;
+          # this workflow does not create a GitHub Release or a tag.
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
+          echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  build-native:
+    needs: verify-tag
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: linux-x64
+          - os: macos-15
+            target: darwin-arm64
+          - os: macos-15-intel
+            target: darwin-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout exactly verified tag commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify-tag.outputs.source_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.85.1 --profile minimal
+      - name: Verify source SHA and native architecture
+        env:
+          SOURCE_SHA: ${{ needs.verify-tag.outputs.source_sha }}
+          TARGET: ${{ matrix.target }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          node -e 'if (process.platform + "-" + process.arch !== process.env.TARGET) process.exit(1)'
+      - name: Test native Rust source
+        run: cargo +1.85.1 test --locked --all-targets
+      - name: Create and verify clean source-built release archive
+        env:
+          SOURCE_SHA: ${{ needs.verify-tag.outputs.source_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/package-rust-candidate.mjs \
+            --out-dir "$RUNNER_TEMP/rust-release" --commit "$SOURCE_SHA" --kind rust-release
+          node scripts/verify-rust-candidate.mjs \
+            --out-dir "$RUNNER_TEMP/rust-release" --commit "$SOURCE_SHA" --kind rust-release
+      - name: Upload verified native bundle for same-run promotion only
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-release-${{ matrix.target }}
+          path: ${{ runner.temp }}/rust-release/
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: [verify-tag, build-native]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Checkout trusted publisher policy from main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Reverify exact annotated tag before any write
+        env:
+          TAG: ${{ inputs.version_tag }}
+          SOURCE_SHA: ${{ needs.verify-tag.outputs.source_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/verify-release-tag.sh "$TAG"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+      - uses: actions/download-artifact@v4
+        with:
+          name: rust-release-linux-x64
+          path: rust-assets/linux-x64
+      - uses: actions/download-artifact@v4
+        with:
+          name: rust-release-darwin-arm64
+          path: rust-assets/darwin-arm64
+      - uses: actions/download-artifact@v4
+        with:
+          name: rust-release-darwin-x64
+          path: rust-assets/darwin-x64
+      - name: Verify every binary, target, checksum and version before upload
+        env:
+          TAG: ${{ inputs.version_tag }}
+          SOURCE_SHA: ${{ needs.verify-tag.outputs.source_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for target in linux-x64 darwin-arm64 darwin-x64; do
+            node scripts/verify-rust-candidate.mjs \
+              --out-dir "rust-assets/$target" --commit "$SOURCE_SHA" \
+              --target "$target" --kind rust-release
+            # Detached metadata must represent precisely this annotated tag.
+            node -e '
+              const fs = require("node:fs");
+              const m = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+              if (m.version !== process.env.TAG) process.exit(1);
+            ' "rust-assets/$target/benchmark-rust-$SOURCE_SHA-$target.json"
+          done
+          # Separate Rust checksums do not replace the original Node SHA256SUMS.
+          for target in linux-x64 darwin-arm64 darwin-x64; do
+            sha256sum "rust-assets/$target/"*.tar.gz "rust-assets/$target/"*.json
+          done | sed 's@rust-assets/[^/]*/@@' | sort -k2 > rust-assets/rust-SHA256SUMS
+          test "$(wc -l < rust-assets/rust-SHA256SUMS)" -eq 6
+      - name: Upload reviewed tag's Rust assets without overwriting existing releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.version_tag }}
+          SOURCE_SHA: ${{ needs.verify-tag.outputs.source_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          # Release already exists, created by the separate existing-tag
+          # Node publisher; never create it or replace a published asset.
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --json assets --jq '.assets[].name' > "$RUNNER_TEMP/current-assets.txt"
+          for path in rust-assets/rust-SHA256SUMS rust-assets/*/*.tar.gz rust-assets/*/*.json; do
+            test -f "$path"
+            if grep -Fqx "$(basename "$path")" "$RUNNER_TEMP/current-assets.txt"; then
+              echo "Rust release asset already exists; refusing replacement: $path" >&2
+              exit 1
+            fi
+          done
+          gh release upload "$TAG" rust-assets/rust-SHA256SUMS \
+            rust-assets/*/*.tar.gz rust-assets/*/*.json \
+            --repo "$GITHUB_REPOSITORY"
