@@ -2,6 +2,9 @@
 //! The deployed reporter still uses src/core.ts until CLI parity and integration
 //! are independently reviewed. Do not silently substitute this for production.
 
+pub mod junit;
+pub use junit::{parse_junit, TestSummary};
+
 const JS_MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -63,10 +66,15 @@ fn checked_sum(left: u64, right: u64) -> Result<u64, LcovError> {
     Ok(total)
 }
 
-// JavaScript Math.round rounds half towards positive infinity, unlike Rust's
-// f64::round. The percentages must agree with the existing Node report.
+// JavaScript Math.round rounds ties towards positive infinity. Adding 0.5
+// before floor loses precision just below a half at very large counters.
 fn js_round(value: f64) -> f64 {
-    (value + 0.5).floor()
+    let lower = value.floor();
+    if value - lower >= 0.5 {
+        lower + 1.0
+    } else {
+        lower
+    }
 }
 
 fn metric(hit: u64, found: u64) -> Metric {
@@ -115,7 +123,7 @@ pub fn parse_lcov(input: &str) -> Result<Coverage, LcovError> {
     let mut records = 0_u64;
 
     for raw_line in input.split('\n') {
-        let line = raw_line.trim();
+        let line = raw_line.trim_matches(|c: char| c.is_whitespace() || c == '\u{feff}');
         if line.is_empty() {
             continue;
         }
@@ -296,6 +304,18 @@ mod tests {
         assert_eq!(js_round(-0.5), 0.0);
         assert_eq!(js_round(-1.5), -1.0);
         assert_eq!(js_round(1.5), 2.0);
+    }
+
+    #[test]
+    fn accepts_bom_prefixed_summary_lines() {
+        let parsed = coverage("﻿LH:1\nLF:1\nend_of_record");
+        assert_eq!(parsed.lines.percent, Some(100.0));
+    }
+
+    #[test]
+    fn matches_js_rounding_near_half_at_safe_integer_boundary() {
+        let parsed = coverage("LH:450359962737\nLF:9007199254740001\nend_of_record");
+        assert_eq!(parsed.lines.percent, Some(0.0));
     }
 
     #[test]

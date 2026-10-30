@@ -149,7 +149,7 @@ This is a first milestone, **not yet a stable or published reusable action**. Ne
 
 ## Experimental Rust migration
 
-The Rust library in `src/lib.rs` currently ports only LCOV aggregate parsing and percentage-point baseline comparisons. This is an **additive, non-production** first slice of [migration issue #15](https://github.com/affank1020/benchmark/issues/15); it is not yet a Rust CLI, and the deployed Node reporter and trusted GitHub workflows are intentionally unchanged.
+The Rust library in `src/lib.rs` and `src/junit.rs` currently ports LCOV aggregate parsing, percentage-point baseline comparisons, and JUnit XML test-summary parsing. This is an **additive, non-production** first slice of [migration issue #15](https://github.com/affank1020/benchmark/issues/15); it is not yet a Rust CLI, and the deployed Node reporter and trusted GitHub workflows are intentionally unchanged.
 
 Run the pinned Rust checks with:
 
@@ -160,6 +160,6 @@ cargo +1.85.1 clippy --locked --all-targets -- -D warnings
 cargo +1.85.1 test --locked --all-targets
 ```
 
-Rust checks run in a separate GitHub Actions CI job alongside the existing Node tests. Next: port JUnit/Jest, complete the Rust CLI and golden output comparison before switching privileged report workflows. Local development may use the Atlas Linux workspace, but its Node currently has no `workspace.dev` execution capability; hosted CI must validate builds until that capability is available.
+Rust checks run in a separate GitHub Actions CI job alongside the existing Node tests. Next: port Jest, complete the Rust CLI and golden output comparison before switching privileged report workflows. JUnit parsing ignores XML comments/CDATA and forbids DTDs or external entities; the future CLI must enforce the same bounded (10 MiB) input size as the current Node implementation. Local development may use the Atlas Linux workspace, but its Node currently has no `workspace.dev` execution capability; hosted CI must validate builds until that capability is available.
 
 License: MIT.
