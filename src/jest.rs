@@ -123,7 +123,9 @@ mod tests {
             }
         );
         assert_eq!(
-            parse_jest(r#"{"numTotalTests":0,"numPassedTests":null}"#).unwrap().passed,
+            parse_jest(r#"{"numTotalTests":0,"numPassedTests":null}"#)
+                .unwrap()
+                .passed,
             0
         );
     }
