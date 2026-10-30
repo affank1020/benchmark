@@ -16,6 +16,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Check Node and Rust release version alignment (read-only)
+        run: node scripts/check-rust-release-readiness.mjs
       # One test execution produces both of Benchmark's supported input formats.
       # Restrict the LCOV file to the reporter implementation, not test files.
       - name: Run unit tests with coverage

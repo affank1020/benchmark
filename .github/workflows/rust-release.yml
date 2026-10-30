@@ -45,6 +45,7 @@ jobs:
           # v0.1.0 is the preserved Node-only release, not a Rust release.
           test "$TAG" != v0.1.0
           bash scripts/verify-release-tag.sh "$TAG"
+          node scripts/check-rust-release-readiness.mjs --version "$TAG"
           test -f scripts/package-rust-candidate.mjs
           test -f scripts/verify-rust-candidate.mjs
           # A Rust promotion augments an existing published Node release;
@@ -131,6 +132,7 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/verify-release-tag.sh "$TAG"
+          node scripts/check-rust-release-readiness.mjs --version "$TAG"
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
       - uses: actions/download-artifact@v4
         with:

@@ -7,6 +7,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { validateReleaseVersions } from "./check-rust-release-readiness.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const MAX_BINARY = 100 * 1024 * 1024;
@@ -54,6 +55,12 @@ async function main() {
     throw new Error("Candidate source checkout has modified tracked files");
   }
 
+  const pkgText = await readFile(join(root, "package.json"), "utf8");
+  const tag = validateReleaseVersions({
+    nodeManifest: pkgText,
+    cargoToml: await readFile(join(root, "Cargo.toml"), "utf8"),
+    cargoLock: await readFile(join(root, "Cargo.lock"), "utf8")
+  });
   const platform = process.platform;
   const arch = process.arch;
   const out = resolve(outArg);
@@ -90,11 +97,10 @@ async function main() {
   const stem = "benchmark-rust-" + commit + "-" + target;
   const archive = stem + ".tar.gz";
   const metadata = stem + ".json";
-  const pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
   const manifest = {
     schemaVersion: 1,
     kind,
-    version: "v" + pkg.version,
+    version: tag,
     commit,
     target,
     rustToolchain: "1.85.1",

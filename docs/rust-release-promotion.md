@@ -8,16 +8,29 @@ This workflow is deliberately separate from the existing `Publish Benchmark Rele
 
 Before any manual dispatch:
 
-1. Independently review and merge the release workflow, native packaging scripts and intended version bump. Confirm main-branch CI and native candidate tests passed.
-2. Explicitly create an **annotated**, never-before-used `vX.Y.Z` tag (not `v0.1.0`) pointing to a reviewed commit on `main` whose `package.json` version matches and includes these scripts. A tag push triggers the **separate original Node release publisher**, which publishes its legacy assets.
-3. Confirm the Node GitHub Release for this exact tag exists and is healthy. Do not bypass its signature/ancestry/identity checks or move an existing tag.
-4. Deliberately dispatch the new Rust workflow against `main` with exactly that existing `version_tag`. For example, after a new reviewed tag has been published:
+1. Independently review and merge the release workflow, native packaging scripts and the **v0.2.0** version-alignment PR. Confirm main-branch CI and the three native candidate jobs passed for the **specific reviewed SHA**. The new read-only `node scripts/check-rust-release-readiness.mjs --version v0.2.0` checks matching `package.json`, `Cargo.toml` and root `Cargo.lock` metadata; it does not establish GitHub authenticity or create anything. Do not tag until the independent review is complete.
+2. **Only after a deliberate owner decision**, create an **annotated**, never-before-used `v0.2.0` tag (never reuse `v0.1.0`) on the reviewed commit of `main`, after checking that the remote tag is absent and resolving the exact SHA. A tag push triggers the **separate existing Node release publisher**, which publishes the Node CLI and pinned workflow assets. Merging the readiness PR does **not** trigger it.
+
+   ```bash
+   git fetch origin main --tags
+   git switch main && git pull --ff-only origin main
+   node scripts/check-rust-release-readiness.mjs --version v0.2.0
+   git ls-remote --tags origin refs/tags/v0.2.0
+   # The previous command MUST print no tag, and main's CI must be green.
+   REVIEWED_SHA="$(git rev-parse HEAD)"
+   git tag -a v0.2.0 "$REVIEWED_SHA" -m "Benchmark v0.2.0"
+   git push origin refs/tags/v0.2.0
+   ```
+
+   A reviewer must inspect the resolved SHA and prior `git ls-remote` output before approving the **explicit tag push**. Never recreate or move an existing release tag.
+3. Confirm the Node GitHub Release for this exact tag exists and is healthy, with its five expected assets, `release-manifest.json` committing to `REVIEWED_SHA` and a valid original `SHA256SUMS`. Do not bypass the annotated-tag/ancestry/identity checks or move an existing tag.
+4. **Separately** dispatch the Rust workflow against `main` with exactly that existing `version_tag` after the Node release is verified. The Rust workflow rechecks the annotated commit and cross-language version alignment before building, and preserves the Node assets unchanged:
 
 ```bash
 gh workflow run rust-release.yml --repo affank1020/benchmark --ref main -f version_tag=v0.2.0
 ```
 
-The example version is **illustrative, not created or released by this PR**. Merely merging the PR does not create a tag, release, or consumer update.
+**These are operator commands, not actions performed by the PR.** No tag or release is created by this version-bump PR or its tests. Even a successful Rust release does not update the existing Atlas or other consumer workflow pins. Check all Rust archives/JSON files and `rust-SHA256SUMS` before any consumer experiment.
 
 ## Trust boundary and distribution
 
