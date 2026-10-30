@@ -12,13 +12,14 @@ fn numeric(value: &Value) -> Result<u64, LcovError> {
         Value::Number(n) => parse_js_count(&n.to_string()),
         Value::String(s) => parse_js_count(s),
         Value::Array(items) if items.is_empty() => Ok(0),
-        Value::Array(items) if items.len() == 1 => {
-            if items[0].is_null() {
-                Ok(0)
-            } else {
-                numeric(&items[0])
-            }
-        }
+        // JavaScript Number(array) first converts the array to its joined
+        // string. A single boolean becomes "true"/"false" (NaN), not 1/0;
+        // null and an empty array stringify to "" (zero).
+        Value::Array(items) if items.len() == 1 => match &items[0] {
+            Value::Null => Ok(0),
+            Value::Bool(_) | Value::Object(_) => Err(invalid("Invalid non-negative integer")),
+            other => numeric(other),
+        },
         _ => Err(invalid("Invalid non-negative integer")),
     }
 }
@@ -31,11 +32,9 @@ fn required(object: &serde_json::Map<String, Value>, key: &str) -> Result<u64, L
 }
 
 fn optional(object: &serde_json::Map<String, Value>, key: &str) -> Result<Option<u64>, LcovError> {
-    object
-        .get(key)
-        .filter(|v| !v.is_null())
-        .map(numeric)
-        .transpose()
+    // Present null must stay present: Number(null) is 0. In particular
+    // numPassedTests=null must NOT trigger the absent-field pass inference.
+    object.get(key).map(numeric).transpose()
 }
 
 pub fn parse_jest(input: &str) -> Result<TestSummary, LcovError> {
@@ -109,6 +108,52 @@ mod tests {
                 .total,
             1
         );
+    }
+
+    #[test]
+    fn explicitly_null_passed_count_is_zero_not_missing() {
+        assert!(parse_jest(r#"{"numTotalTests":2,"numPassedTests":null}"#).is_err());
+        assert_eq!(
+            parse_jest(r#"{"numTotalTests":2,"numPassedTests":null,"numFailedTests":2}"#).unwrap(),
+            TestSummary {
+                total: 2,
+                passed: 0,
+                failed: 2,
+                skipped: 0
+            }
+        );
+        assert_eq!(
+            parse_jest(r#"{"numTotalTests":0,"numPassedTests":null}"#).unwrap().passed,
+            0
+        );
+    }
+
+    #[test]
+    fn array_counts_use_node_string_coercion_not_recursive_boolean_coercion() {
+        for invalid_case in [
+            r#"{"numTotalTests":[true],"numPassedTests":1}"#,
+            r#"{"numTotalTests":[false],"numPassedTests":0}"#,
+            r#"{"numTotalTests":[1,2]}"#,
+            r#"{"numTotalTests":[{}]}"#,
+            r#"{"numTotalTests":[[true]]}"#,
+        ] {
+            assert!(parse_jest(invalid_case).is_err(), "accepted {invalid_case}");
+        }
+        for valid_case in [
+            r#"{"numTotalTests":[null]}"#,
+            r#"{"numTotalTests":[]}"#,
+            r#"{"numTotalTests":[[]]}"#,
+            r#"{"numTotalTests":[""]}"#,
+        ] {
+            assert_eq!(parse_jest(valid_case).unwrap().total, 0, "{valid_case}");
+        }
+        for valid_case in [
+            r#"{"numTotalTests":[1],"numPassedTests":1}"#,
+            r#"{"numTotalTests":["1"],"numPassedTests":[1]}"#,
+            r#"{"numTotalTests":[["1"]],"numPassedTests":1}"#,
+        ] {
+            assert_eq!(parse_jest(valid_case).unwrap().passed, 1, "{valid_case}");
+        }
     }
 
     #[test]

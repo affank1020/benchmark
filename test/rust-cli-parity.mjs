@@ -31,6 +31,14 @@ try {
   const malformed = file("malformed.info", "SF:a\nLH:7\nLF:invalid\nend_of_record\n");
   const jest = file("jest.json", JSON.stringify({ numTotalTests: 8, numPassedTests: 5, numFailedTests: 1, numPendingTests: 1, numTodoTests: 1 }));
   const jestPlus = file("jest-plus.json", JSON.stringify({ numTotalTests: "+2", numPassedTests: "1", numTodoTests: "+1" }));
+  const nullPassedInvalid = file("jest-passed-null-invalid.json", JSON.stringify({ numTotalTests: 2, numPassedTests: null }));
+  const nullPassedValid = file("jest-passed-null-valid.json", JSON.stringify({ numTotalTests: 2, numPassedTests: null, numFailedTests: 2 }));
+  const booleanArrayTrue = file("jest-array-true.json", JSON.stringify({ numTotalTests: [true], numPassedTests: 1 }));
+  const booleanArrayFalse = file("jest-array-false.json", JSON.stringify({ numTotalTests: [false], numPassedTests: 0 }));
+  const nullArray = file("jest-array-null.json", JSON.stringify({ numTotalTests: [null] }));
+  const numberArray = file("jest-array-number.json", JSON.stringify({ numTotalTests: [1], numPassedTests: [1] }));
+  const nestedArray = file("jest-array-nested.json", JSON.stringify({ numTotalTests: [["1"]], numPassedTests: 1 }));
+  const invalidMultiArray = file("jest-array-multiple.json", JSON.stringify({ numTotalTests: [1, 2] }));
   const junitPlus = file("junit-plus.xml", '<testsuite tests="+1" failures="+0"><testcase/></testsuite>');
   const missing = join(directory, "nonexistent.info");
   const bomLcov = file("bom.info", "\ufeffLH:1\nLF:2\nend_of_record");
@@ -46,6 +54,14 @@ try {
     ["junit-plus", ["--tests", junitPlus]],
     ["jest-todos", ["--tests", jest, "--tests-format", "jest", "--ci", "success"]],
     ["jest-plus", ["--tests", jestPlus, "--tests-format", "jest"]],
+    ["jest-passed-null-invalid", ["--tests", nullPassedInvalid, "--tests-format", "jest"]],
+    ["jest-passed-null-valid", ["--tests", nullPassedValid, "--tests-format", "jest"]],
+    ["jest-boolean-array-true", ["--tests", booleanArrayTrue, "--tests-format", "jest"]],
+    ["jest-boolean-array-false", ["--tests", booleanArrayFalse, "--tests-format", "jest"]],
+    ["jest-null-array", ["--tests", nullArray, "--tests-format", "jest"]],
+    ["jest-number-array", ["--tests", numberArray, "--tests-format", "jest"]],
+    ["jest-nested-array", ["--tests", nestedArray, "--tests-format", "jest"]],
+    ["jest-multi-array", ["--tests", invalidMultiArray, "--tests-format", "jest"]],
     ["invalid-coverage", ["--coverage", malformed, "--baseline-coverage", baseline]],
     ["missing-current", ["--coverage", missing, "--baseline-coverage", baseline]],
     ["invalid-test", ["--tests", malformed, "--ci", "failure"]],
@@ -61,6 +77,13 @@ try {
     const rustOutput = invoke([rust], args, join(directory, "rust.json"));
     assert.deepEqual(rustOutput.json, baselineOutput.json, label + ": JSON mismatch");
     assert.equal(rustOutput.markdown, baselineOutput.markdown, label + ": Markdown mismatch");
+    if ([
+      "jest-passed-null-invalid", "jest-boolean-array-true",
+      "jest-boolean-array-false", "jest-multi-array"
+    ].includes(label)) {
+      assert.equal(baselineOutput.json.tests, undefined, label + ": invalid Jest tests not rejected");
+      assert.deepEqual(baselineOutput.json.diagnostics, ["Test artifact missing or invalid"]);
+    }
     console.log("PASS parity " + label);
   }
   const nodeOut = join(directory, "node.md");
