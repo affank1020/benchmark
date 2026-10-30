@@ -2,11 +2,15 @@
 
 This project publishes **GitHub Releases**, not npm packages. The CLI remains dependency-free, and the consumer workflow permissions are deliberately isolated from PR CI.
 
+## Next planned release: v0.2.0 (Node + optional Rust)
+
+The first version that supports Rust release assets is **v0.2.0**, prepared across the Node and Cargo metadata and enforced by `scripts/check-rust-release-readiness.mjs`. Its tag is **not** created by merging the preparation PR. The existing `v0.1.0` remains an immutable Node-only release and must never be moved or republished. For `v0.2.0`, first complete the Node release below and verify its assets, then separately decide whether to [manually promote Rust binaries](rust-release-promotion.md) for that same reviewed annotated tag. No consumer upgrades automatically.
+
 ## Pre-release checklist
 
 1. Have the release changes independently reviewed and merged to `main`; do not release an unreviewed PR head.
-2. Confirm the full test suite and main-branch CI passed for the intended SHA. Confirm `package.json` has the desired **stable** version, for example `0.1.0`.
-3. Check that no protected release tag already exists. Create an **annotated** tag on the reviewed main commit: `git tag -a v0.1.0 <reviewed-main-SHA> -m 'Benchmark v0.1.0'`; then deliberately push it: `git push origin v0.1.0`. This is a privileged release action and is not performed by an ordinary PR.
+2. Confirm the full test suite and main-branch CI passed for the intended SHA. Confirm `package.json` has the desired **stable** version, for example `0.2.0`.
+3. Check that no protected release tag already exists. Create an **annotated** tag on the reviewed main commit: `git tag -a v0.2.0 <reviewed-main-SHA> -m 'Benchmark v0.2.0'`; then deliberately push it: `git push origin v0.2.0`. Never reuse the already-published `v0.1.0`. This is a privileged release action and is not performed by an ordinary PR.
 4. The [release workflow](../.github/workflows/release.yml) checks out the reviewed default-branch release policy, **re-fetches the remote annotated tag object**, verifies its exact version and ancestry from `main`, and switches to the tag's **original exact commit** before packaging. It verifies `SHA256SUMS`, then calls `gh release create --verify-tag` against the existing tag. The source of the tag is never rewritten.
 5. Review the [GitHub Releases](https://github.com/affank1020/benchmark/releases) page and the workflow run. Check `release-manifest.json` for the version and 40-character commit SHA. Verify downloaded asset bytes with `sha256sum -c SHA256SUMS` from the download directory.
 
