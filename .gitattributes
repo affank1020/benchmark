@@ -1,0 +1,3 @@
+# Language stats should represent the implementation, not the test harness.
+# Tests remain tracked, visible in diffs, and run in CI unchanged.
+test/** -linguist-detectable
