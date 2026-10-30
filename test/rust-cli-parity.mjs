@@ -35,6 +35,8 @@ try {
   const missing = join(directory, "nonexistent.info");
   const bomLcov = file("bom.info", "\ufeffLH:1\nLF:2\nend_of_record");
   const extreme = file("extreme.info", "LH:450359962737\nLF:9007199254740001\nend_of_record");
+  // Both CLIs must reject files larger than the 10 MiB limit before parsing.
+  const oversized = file("oversized.info", "x".repeat(10 * 1024 * 1024 + 1));
 
   cases.push(
     ["empty", []],
@@ -50,7 +52,8 @@ try {
     ["bom-coverage", ["--coverage", bomLcov]],
     ["extreme-coverage", ["--coverage", extreme]],
     ["unknown-ci", ["--ci", "success | untrusted", "--coverage", current]],
-    ["missing-baseline", ["--coverage", current, "--baseline-coverage", missing]]
+    ["missing-baseline", ["--coverage", current, "--baseline-coverage", missing]],
+    ["oversized-input", ["--coverage", oversized]]
   );
 
   for (const [label, args] of cases) {

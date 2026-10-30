@@ -151,6 +151,15 @@ This is a first milestone, **not yet a stable or published reusable action**. Ne
 
 The Rust package now includes an **experimental standalone CLI** (`src/main.rs`) with LCOV, JUnit and Jest parsing, bounded file inputs, Markdown/JSON reports and optional baselines. The Rust binary is not yet used by the trusted GitHub publisher; the existing Node CLI and consumer workflow are unchanged. This is an **additive, non-production** implementation of [migration issue #15](https://github.com/affank1020/benchmark/issues/15). The deployed Node reporter and trusted GitHub workflows remain unchanged.
 
+Try the Rust executable locally, without changing any trusted GitHub integration:
+
+```bash
+cargo +1.85.1 run --locked --bin benchmark -- \
+  --coverage coverage/lcov.info \
+  --tests test-results/junit.xml \
+  --ci success --json benchmark.json
+```
+
 Run the pinned Rust checks with:
 
 ```bash
