@@ -59,7 +59,9 @@ fn check_summary(suite: &Suite) -> Result<(u64, u64), LcovError> {
         for (name, actual) in keys {
             if let Some(declared) = attribute_count(&suite.attrs, name)? {
                 if declared != actual {
-                    return Err(invalid("JUnit suite attributes disagree with testcase outcomes"));
+                    return Err(invalid(
+                        "JUnit suite attributes disagree with testcase outcomes",
+                    ));
                 }
             }
         }
@@ -75,7 +77,9 @@ fn check_summary(suite: &Suite) -> Result<(u64, u64), LcovError> {
         return Err(invalid("Incomplete JUnit outcome data"));
     };
     if suite.failures > failures || suite.errors > errors || suite.skipped > skipped {
-        return Err(invalid("JUnit suite attributes disagree with testcase outcomes"));
+        return Err(invalid(
+            "JUnit suite attributes disagree with testcase outcomes",
+        ));
     }
     if checked_sum(checked_sum(failures, errors)?, skipped)? > suite.tests {
         return Err(invalid("JUnit counts inconsistent"));
@@ -175,12 +179,17 @@ fn attributes(input: &str) -> Result<BTreeMap<String, String>, LcovError> {
             return Err(invalid("Invalid JUnit XML attribute"));
         }
         rest = rest[1..].trim_start();
-        let quote = rest.chars().next().ok_or_else(|| invalid("Invalid JUnit XML attribute"))?;
+        let quote = rest
+            .chars()
+            .next()
+            .ok_or_else(|| invalid("Invalid JUnit XML attribute"))?;
         if quote != '"' && quote != '\'' {
             return Err(invalid("Invalid JUnit XML attribute"));
         }
         rest = &rest[1..];
-        let pos = rest.find(quote).ok_or_else(|| invalid("Invalid JUnit XML attribute"))?;
+        let pos = rest
+            .find(quote)
+            .ok_or_else(|| invalid("Invalid JUnit XML attribute"))?;
         let value = &rest[..pos];
         if attrs.insert(key.to_string(), value.to_string()).is_some() {
             return Err(invalid("Duplicate JUnit XML attribute"));
@@ -214,11 +223,17 @@ pub fn parse_junit(input: &str) -> Result<TestSummary, LcovError> {
                 return Err(invalid("Malformed JUnit XML nesting"));
             }
             if closing == "testcase" {
-                let completed = case.take().ok_or_else(|| invalid("Unexpected JUnit testcase closing tag"))?;
+                let completed = case
+                    .take()
+                    .ok_or_else(|| invalid("Unexpected JUnit testcase closing tag"))?;
                 finish_case(completed, suite.as_mut().unwrap_or(&mut root_cases))?;
             }
-            if closing == "testsuite" && stack.iter().filter(|name| **name == "testsuite").count() == 1 {
-                let completed = suite.take().ok_or_else(|| invalid("Unexpected JUnit suite closing tag"))?;
+            if closing == "testsuite"
+                && stack.iter().filter(|name| **name == "testsuite").count() == 1
+            {
+                let completed = suite
+                    .take()
+                    .ok_or_else(|| invalid("Unexpected JUnit suite closing tag"))?;
                 let (suite_failed, suite_skipped) = check_summary(&completed)?;
                 total = checked_sum(total, completed.tests)?;
                 failed = checked_sum(failed, suite_failed)?;
@@ -232,7 +247,11 @@ pub fn parse_junit(input: &str) -> Result<TestSummary, LcovError> {
         }
 
         let self_closing = tag.ends_with('/');
-        let open = if self_closing { tag[..tag.len() - 1].trim_end() } else { tag };
+        let open = if self_closing {
+            tag[..tag.len() - 1].trim_end()
+        } else {
+            tag
+        };
         let (name, remainder) = tag_name(open)?;
         let attrs = attributes(remainder)?;
         if stack.is_empty() {
@@ -250,7 +269,11 @@ pub fn parse_junit(input: &str) -> Result<TestSummary, LcovError> {
             let tests = attribute_count(&attrs, "tests")?
                 .ok_or_else(|| invalid("JUnit suite missing tests"))?;
             suite_count = checked_sum(suite_count, 1)?;
-            suite = Some(Suite { tests, attrs, ..Suite::default() });
+            suite = Some(Suite {
+                tests,
+                attrs,
+                ..Suite::default()
+            });
         }
         if name == "testcase" {
             let direct = suite.is_none() && stack.len() == 1 && stack[0] == "testsuites";
@@ -271,11 +294,15 @@ pub fn parse_junit(input: &str) -> Result<TestSummary, LcovError> {
 
         if self_closing {
             if name == "testcase" {
-                let completed = case.take().ok_or_else(|| invalid("Unexpected JUnit testcase closing tag"))?;
+                let completed = case
+                    .take()
+                    .ok_or_else(|| invalid("Unexpected JUnit testcase closing tag"))?;
                 finish_case(completed, suite.as_mut().unwrap_or(&mut root_cases))?;
             }
             if outermost {
-                let completed = suite.take().ok_or_else(|| invalid("Unexpected JUnit suite closing tag"))?;
+                let completed = suite
+                    .take()
+                    .ok_or_else(|| invalid("Unexpected JUnit suite closing tag"))?;
                 let (suite_failed, suite_skipped) = check_summary(&completed)?;
                 total = checked_sum(total, completed.tests)?;
                 failed = checked_sum(failed, suite_failed)?;
@@ -317,7 +344,12 @@ pub fn parse_junit(input: &str) -> Result<TestSummary, LcovError> {
             }
         }
     }
-    Ok(TestSummary { total, failed, skipped, passed: total - resolved })
+    Ok(TestSummary {
+        total,
+        failed,
+        skipped,
+        passed: total - resolved,
+    })
 }
 
 #[cfg(test)]
@@ -326,7 +358,10 @@ mod tests {
 
     fn summary(input: &str, expected: (u64, u64, u64, u64)) {
         let actual = parse_junit(input).expect("valid JUnit");
-        assert_eq!((actual.total, actual.passed, actual.failed, actual.skipped), expected);
+        assert_eq!(
+            (actual.total, actual.passed, actual.failed, actual.skipped),
+            expected
+        );
     }
 
     #[test]
@@ -341,7 +376,10 @@ mod tests {
 
     #[test]
     fn flat_node_reporter_cases_and_todos() {
-        summary(include_str!("../test/fixtures/node22-junit.xml"), (3, 1, 1, 1));
+        summary(
+            include_str!("../test/fixtures/node22-junit.xml"),
+            (3, 1, 1, 1),
+        );
     }
 
     #[test]
