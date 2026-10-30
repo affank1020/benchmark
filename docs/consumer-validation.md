@@ -15,6 +15,14 @@ Benchmark's reusable reporter runs in the **consumer repository's trusted defaul
 
 After a reviewed Benchmark release, download `benchmark-report.yml` and `benchmark-lifecycle.yml` from that release and inspect their **40-character source and trusted matcher SHAs**. Each release also provides a SHA256 manifest for checking downloaded assets. Match the `workflows: [CI]` name to the consumer's existing read-only CI workflow, and keep the publishing workflows on its default branch. The release does not deploy anything automatically to consumers; see [release procedure](releasing.md).
 
+## Rust binary consumer validation (separate from the GitHub API publisher)
+
+The **native Rust CLI** can be downloaded and installed offline using [`scripts/install-rust-release.mjs`](../scripts/install-rust-release.mjs) and the exact version/tag/commit recipe in [Rust release promotion](rust-release-promotion.md). The installer validates released asset bytes and target architecture before writing into a **new** installation directory; it does **not** alter the consumer's GitHub Actions workflow, grant comment permissions, execute the downloaded program or trigger an automatic upgrade.
+
+The read-only CI matrix executes the installer's local positive and negative fixtures on Linux x64, macOS arm64 and macOS Intel. **These use simulated release inputs**, rather than a real downloaded GitHub Release, and are not a substitute for a live external consumer drill.
+
+After a real reviewed Rust release exists, record the exact source SHA, tag, downloaded `rust-SHA256SUMS`, native binary hash, installation receipt and run result from a **separate disposable consumer repository**. Also verify switching the consumer back to its existing immutable Node/v0.1.0 pin. Do not upgrade Atlas as a side effect of testing the installer. The `workflow_run` publisher's checked-out Rust source is pinned independently and has its own review/deployment process.
+
 ## Multi-job CI inputs
 
 The reusable reporter accepts `tests_artifact_name` and `coverage_artifact_name` from independent jobs in the same CI workflow run. Each exact-name artifact is validated and downloaded by ID to an isolated directory; duplicate, oversized or expired artifacts cannot be silently substituted. The baseline comparison uses the coverage artifact name from the exact base-branch push CI run. The default combined `benchmark-ci` format is still supported.

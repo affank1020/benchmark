@@ -31,6 +31,32 @@ It uploads six uniquely named source-SHA/target assets (archive + detached JSON 
 
 **Important limitations:** Per-file SHA-256 and a GitHub Release uploaded by the reviewed workflow establish internal integrity and intended source identity, but this PR does **not** implement independent Sigstore/SLSA binary attestations or reproducible-build proofs. The same-run GitHub Actions build artifacts are trusted only within this explicitly reviewed manual workflow, never via a `workflow_run` accepting PR-supplied artifacts. Runtime verification of the privileged publisher is **not possible on PR CI**; it requires a later deliberate new annotated tag and release. GitHub repository protections and tag policies must be configured separately.
 
+## Verified offline consumer installation (no auto-upgrade)
+
+Only **after** a reviewed version has been explicitly tagged, the manual release workflow has published its official assets, and the exact tagged commit is independently known, use a checkout of this install script from the **reviewed source commit**:
+
+```bash
+# Illustrative values only; a v0.2.0 release has not been created by this PR.
+TAG=v0.2.0
+SHA=REPLACE_WITH_THE_REVIEWED_40_CHARACTER_TAG_COMMIT
+TARGET=linux-x64   # For a Linux x64 consumer; use darwin-arm64 / darwin-x64 on macOS
+mkdir -p ./benchmark-download
+gh release download "$TAG" --repo affank1020/benchmark \
+  --dir ./benchmark-download \
+  --pattern "rust-SHA256SUMS" \
+  --pattern "benchmark-rust-$SHA-$TARGET.tar.gz" \
+  --pattern "benchmark-rust-$SHA-$TARGET.json"
+
+node scripts/install-rust-release.mjs \
+  --assets-dir ./benchmark-download --version "$TAG" \
+  --commit "$SHA" --dest "./benchmark-installed-$TAG"
+./benchmark-installed-$TAG/benchmark --tests ./test/fixtures/node22-junit.xml --ci failure
+```
+
+The installer supports **linux-x64, darwin-arm64 and darwin-x64** on the matching native host. It requires exactly the archive, detached JSON manifest and complete six-entry `rust-SHA256SUMS`. It checks SHA-256 digests, the complete expected platform inventory, exact source commit and version, the `rust-release` kind, architecture, tar member modes and executable permissions, and the embedded manifest/binary identity. It then writes the verified executable plus an `installation.json` receipt to a **new, previously nonexistent** destination. It never automatically executes the binary and refuses to overwrite an installation. A caller must review the source/release identity and supply the expected SHA; the checksums alone are **not independent evidence of signing, provenance, or GitHub repository authenticity**.
+
+For rollback, retain the previously reviewed executable and consumer workflow SHA. Restore those explicit paths/pins and rerun CI; do not move `v0.1.0` or retag any release. A real separate-repository test consumer (including its fork/rerun paths) is **still required** before a production Atlas upgrade.
+
 ## Failure and rollback
 
 If tag validation, native builds, archive verification or any pre-upload identity check fails, **nothing new should be uploaded**. If GitHub upload fails partway through, a partial Rust asset set might exist: the job refuses to overwrite on retry. An owner must inspect the exact uploaded assets and original job logs, then choose a reviewed manual recovery; do **not** automatically delete, overwrite or retag any assets.
