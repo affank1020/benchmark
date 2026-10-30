@@ -56,9 +56,16 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install pinned Rust toolchain
         run: rustup toolchain install 1.85.1 --profile minimal --component clippy --component rustfmt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
       - name: Check Rust formatting
         run: cargo +1.85.1 fmt --all -- --check
       - name: Lint Rust code
         run: cargo +1.85.1 clippy --locked --all-targets -- -D warnings
       - name: Run Rust tests
         run: cargo +1.85.1 test --locked --all-targets
+      - name: Build CLI and verify Node/Rust report parity
+        run: |
+          cargo +1.85.1 build --locked --bin benchmark
+          node test/rust-cli-parity.mjs

@@ -149,7 +149,16 @@ This is a first milestone, **not yet a stable or published reusable action**. Ne
 
 ## Experimental Rust migration
 
-The Rust library in `src/lib.rs` and `src/junit.rs` currently ports LCOV aggregate parsing, percentage-point baseline comparisons, and JUnit XML test-summary parsing. This is an **additive, non-production** first slice of [migration issue #15](https://github.com/affank1020/benchmark/issues/15); it is not yet a Rust CLI, and the deployed Node reporter and trusted GitHub workflows are intentionally unchanged.
+The Rust package now includes an **experimental standalone CLI** (`src/main.rs`) with LCOV, JUnit and Jest parsing, bounded file inputs, Markdown/JSON reports and optional baselines. The Rust binary is not yet used by the trusted GitHub publisher; the existing Node CLI and consumer workflow are unchanged. This is an **additive, non-production** implementation of [migration issue #15](https://github.com/affank1020/benchmark/issues/15). The deployed Node reporter and trusted GitHub workflows remain unchanged.
+
+Try the Rust executable locally, without changing any trusted GitHub integration:
+
+```bash
+cargo +1.85.1 run --locked --bin benchmark -- \
+  --coverage coverage/lcov.info \
+  --tests test-results/junit.xml \
+  --ci success --json benchmark.json
+```
 
 Run the pinned Rust checks with:
 
@@ -158,8 +167,10 @@ rustup toolchain install 1.85.1 --profile minimal --component clippy --component
 cargo +1.85.1 fmt --all -- --check
 cargo +1.85.1 clippy --locked --all-targets -- -D warnings
 cargo +1.85.1 test --locked --all-targets
+cargo +1.85.1 build --locked --bin benchmark
+node test/rust-cli-parity.mjs
 ```
 
-Rust checks run in a separate GitHub Actions CI job alongside the existing Node tests. Next: port Jest, complete the Rust CLI and golden output comparison before switching privileged report workflows. JUnit parsing ignores XML comments/CDATA and forbids DTDs or external entities; the future CLI must enforce the same bounded (10 MiB) input size as the current Node implementation. Local development may use the Atlas Linux workspace, but its Node currently has no `workspace.dev` execution capability; hosted CI must validate builds until that capability is available.
+Rust checks run in a separate GitHub Actions CI job alongside the existing Node tests. The read-only Rust CI job runs Node↔Rust Markdown and JSON parity fixtures, including malformed/missing artifacts and large counter edges. The Rust CLI enforces the existing 10 MiB input limit, does not rerun tests, and is not a security boundary for GitHub publication. Next: full trusted-workflow integration and verified binary distribution after independent review. Local development may use the Atlas Linux workspace, but its Node currently has no `workspace.dev` execution capability; hosted CI must validate builds until that capability is available.
 
 License: MIT.

@@ -2,7 +2,9 @@
 //! The deployed reporter still uses src/core.ts until CLI parity and integration
 //! are independently reviewed. Do not silently substitute this for production.
 
+pub mod jest;
 pub mod junit;
+pub use jest::parse_jest;
 pub use junit::{parse_junit, TestSummary};
 
 const JS_MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
@@ -54,6 +56,43 @@ fn parse_count(text: &str) -> Result<u64, LcovError> {
         return Err(invalid("Invalid non-negative integer"));
     }
     Ok(value)
+}
+
+/// Node's Number(value) followed by a safe non-negative integer check. Unlike
+/// LCOV summary fields, JUnit/Jest counters accept e.g. "+1" and "1e2".
+pub(crate) fn parse_js_count(input: &str) -> Result<u64, LcovError> {
+    let text = input.trim_matches(|c: char| c.is_whitespace() || c == '\u{feff}');
+    if text.is_empty() {
+        return Ok(0);
+    }
+    let radix = if text.starts_with("0x") || text.starts_with("0X") {
+        Some(16)
+    } else if text.starts_with("0b") || text.starts_with("0B") {
+        Some(2)
+    } else if text.starts_with("0o") || text.starts_with("0O") {
+        Some(8)
+    } else {
+        None
+    };
+    if let Some(radix) = radix {
+        let count = u64::from_str_radix(&text[2..], radix)
+            .map_err(|_| invalid("Invalid non-negative integer"))?;
+        if count > JS_MAX_SAFE_INTEGER {
+            return Err(invalid("Invalid non-negative integer"));
+        }
+        return Ok(count);
+    }
+    let value: f64 = text
+        .parse()
+        .map_err(|_| invalid("Invalid non-negative integer"))?;
+    if !value.is_finite()
+        || value < 0.0
+        || value.fract() != 0.0
+        || value > JS_MAX_SAFE_INTEGER as f64
+    {
+        return Err(invalid("Invalid non-negative integer"));
+    }
+    Ok(value as u64)
 }
 
 fn checked_sum(left: u64, right: u64) -> Result<u64, LcovError> {
