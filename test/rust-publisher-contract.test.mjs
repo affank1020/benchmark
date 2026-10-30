@@ -48,7 +48,11 @@ test("every trusted publisher compiles the exact pinned Rust reporter with no PR
     assert.ok(yaml.indexOf("Resolve current PR safely") < yaml.indexOf("Checkout pinned Rust reporter source"));
     assert.ok(yaml.indexOf("Build pinned Rust reporter") < yaml.indexOf("Generate quality report (even after CI failure)"));
     assert.ok(yaml.indexOf("Generate quality report (even after CI failure)") < yaml.indexOf("Update one PR comment if still current"));
-    assert.match(yaml, /workflow_run:[\s\S]*?types: \[completed\]/);
+    if (yaml === sources[1]) {
+      assert.match(yaml, /workflow_call:/, "Reusable publisher must be callable");
+    } else {
+      assert.match(yaml, /workflow_run:[\s\S]*?types: \[completed\]/);
+    }
     assert.match(yaml, /queue: max\n\s*cancel-in-progress: false/);
     assert.doesNotMatch(yaml, /pull_request_target/);
     assert.doesNotMatch(yaml, /ref: (?:main|master|HEAD|\$\{\{)/);
