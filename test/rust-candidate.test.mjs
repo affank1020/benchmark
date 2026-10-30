@@ -1,7 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { execFileSync, spawnSync } from "node:child_process";
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, unlink, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { validateNativeBinary } from "../scripts/package-rust-candidate.mjs";
 
@@ -70,4 +73,65 @@ test("Rust candidate CI is read-only, native and separate from tagged privileged
   assert.match(release, /Verify existing annotated tag/);
   assert.match(release, /gh release create/);
   assert.doesNotMatch(release, /package-rust-candidate|verify-rust-candidate/);
+});
+
+
+test("verifier rejects a rehashed archive with a symlink or non-executable CLI", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "benchmark-tar-types-"));
+  try {
+    const stage = join(tmp, "stage");
+    const dir = join(stage, "benchmark-rust");
+    const out = join(tmp, "out");
+    await mkdir(dir, { recursive: true });
+    await mkdir(out);
+    const sha = "a".repeat(40);
+    const target = process.platform + "-" + process.arch;
+    const binary = process.platform === "darwin" ? mach(process.arch) : elf(process.arch);
+    const manifest = JSON.stringify({
+      schemaVersion: 1, kind: "unreleased-ci-candidate", version: "v0.1.0",
+      commit: sha, target, rustToolchain: "1.85.1",
+      binary: { name: "benchmark", bytes: binary.length,
+        sha256: createHash("sha256").update(binary).digest("hex") }
+    }, null, 2) + "\n";
+    await writeFile(join(dir, "benchmark"), binary, { mode: 0o755 });
+    await writeFile(join(dir, "README.md"), "candidate\n");
+    await writeFile(join(dir, "manifest.json"), manifest);
+    const stem = "benchmark-rust-" + sha + "-" + target;
+    const archive = stem + ".tar.gz";
+    const meta = stem + ".json";
+    await writeFile(join(out, meta), manifest);
+    const repack = async () => {
+      execFileSync("tar", ["-czf", join(out, archive), "-C", stage, "benchmark-rust"]);
+      const digest = name => createHash("sha256").update(execFileSync("cat", [join(out, name)])).digest("hex");
+      await writeFile(join(out, "SHA256SUMS"),
+        [archive, meta].sort().map(name => digest(name) + "  " + name).join("\n") + "\n");
+    };
+    const verify = () => spawnSync(process.execPath, [
+      fileURLToPath(new URL("../scripts/verify-rust-candidate.mjs", import.meta.url)),
+      "--out-dir", out, "--commit", sha
+    ], { encoding: "utf8" });
+
+    await repack();
+    assert.equal(verify().status, 0, "Valid control archive should verify");
+    await unlink(join(dir, "README.md"));
+    await symlink("manifest.json", join(dir, "README.md"));
+    await repack();
+    assert.match(verify().stderr, /Invalid archive member type/, "Rehashed symlink must fail");
+    await unlink(join(dir, "README.md"));
+    await writeFile(join(dir, "README.md"), "candidate\n");
+    await chmod(join(dir, "benchmark"), 0o644);
+    await repack();
+    assert.match(verify().stderr, /Invalid archive member type or executable permissions/,
+      "Rehashed non-executable binary must fail");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("native packager always makes a fresh isolated Cargo build before archive", async () => {
+  const code = await readFile(new URL("../scripts/package-rust-candidate.mjs", import.meta.url), "utf8");
+  assert.match(code, /mkdtemp\(join\(tmpdir\(\), "benchmark-rust-source-build-"\)\)/);
+  assert.match(code, /"build", "--locked", "--release", "--bin", "benchmark"/);
+  assert.match(code, /"--target-dir", build/);
+  assert.doesNotMatch(code, /join\(root, "target", "release", "benchmark"\)/);
 });
