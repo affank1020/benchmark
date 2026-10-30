@@ -4,7 +4,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::{checked_sum, invalid, parse_count, LcovError};
+use crate::{checked_sum, invalid, parse_js_count, LcovError};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TestSummary {
@@ -32,13 +32,7 @@ struct TestCase {
 }
 
 fn count(value: &str) -> Result<u64, LcovError> {
-    // Number("") in the JavaScript implementation is zero.
-    let value = value.trim();
-    if value.is_empty() {
-        Ok(0)
-    } else {
-        parse_count(value)
-    }
+    parse_js_count(value)
 }
 
 fn attribute_count(attrs: &BTreeMap<String, String>, name: &str) -> Result<Option<u64>, LcovError> {
@@ -362,6 +356,13 @@ mod tests {
             (actual.total, actual.passed, actual.failed, actual.skipped),
             expected
         );
+    }
+
+    #[test]
+    fn accepts_node_compatible_junit_numeric_attributes() {
+        summary("<testsuite tests=\"+1\" failures=\"+0\"><testcase/></testsuite>", (1, 1, 0, 0));
+        summary("<testsuite tests=\"1e2\" failures=\"0\" errors=\"0\" skipped=\"100\"/>", (100, 0, 0, 100));
+        summary("<testsuite tests=\"0x2\" failures=\"0\" errors=\"0\" skipped=\"2\"/>", (2, 0, 0, 2));
     }
 
     #[test]
