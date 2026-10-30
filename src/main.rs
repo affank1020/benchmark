@@ -7,7 +7,10 @@ use std::{
     path::Path,
 };
 
-use benchmark_core::{compare_coverage, parse_jest, parse_junit, parse_lcov, Coverage, CoverageChange, Metric, TestSummary};
+use benchmark_core::{
+    compare_coverage, parse_jest, parse_junit, parse_lcov, Coverage, CoverageChange, Metric,
+    TestSummary,
+};
 use serde_json::{json, Map, Value};
 
 const MAX_INPUT_BYTES: u64 = 10 * 1024 * 1024;
@@ -111,10 +114,7 @@ fn pct(m: Option<&Metric>) -> String {
 }
 
 fn delta(value: Option<f64>) -> String {
-    value.map_or_else(
-        || "Not reported".to_owned(),
-        |x| format!("{x:+.2} pp"),
-    )
+    value.map_or_else(|| "Not reported".to_owned(), |x| format!("{x:+.2} pp"))
 }
 
 fn markdown(
@@ -132,20 +132,31 @@ fn markdown(
         "".to_owned(),
     ];
     let has_baseline = baseline.is_some();
-    lines.push(if has_baseline {
-        "| Metric | Result | Baseline | Change |"
-    } else {
-        "| Metric | Result |"
-    }.to_owned());
-    lines.push(if has_baseline {
-        "| --- | --- | --- | --- |"
-    } else {
-        "| --- | --- |"
-    }.to_owned());
+    lines.push(
+        if has_baseline {
+            "| Metric | Result | Baseline | Change |"
+        } else {
+            "| Metric | Result |"
+        }
+        .to_owned(),
+    );
+    lines.push(
+        if has_baseline {
+            "| --- | --- | --- | --- |"
+        } else {
+            "| --- | --- |"
+        }
+        .to_owned(),
+    );
 
     let test_summary = tests.map_or_else(
         || "Not reported".to_owned(),
-        |t| format!("{} passed · {} failed · {} skipped / {} total", t.passed, t.failed, t.skipped, t.total),
+        |t| {
+            format!(
+                "{} passed · {} failed · {} skipped / {} total",
+                t.passed, t.failed, t.skipped, t.total
+            )
+        },
     );
     lines.push(if has_baseline {
         format!("| Tests | {test_summary} | — | — |")
@@ -155,12 +166,32 @@ fn markdown(
 
     let diff = compare_coverage(coverage, baseline);
     for (label, current, before, delta_metric) in [
-        ("Line coverage", coverage.map(|c| &c.lines), baseline.map(|b| &b.lines), diff.as_ref().and_then(|d| d.lines)),
-        ("Function coverage", coverage.map(|c| &c.functions), baseline.map(|b| &b.functions), diff.as_ref().and_then(|d| d.functions)),
-        ("Branch coverage", coverage.map(|c| &c.branches), baseline.map(|b| &b.branches), diff.as_ref().and_then(|d| d.branches)),
+        (
+            "Line coverage",
+            coverage.map(|c| &c.lines),
+            baseline.map(|b| &b.lines),
+            diff.as_ref().and_then(|d| d.lines),
+        ),
+        (
+            "Function coverage",
+            coverage.map(|c| &c.functions),
+            baseline.map(|b| &b.functions),
+            diff.as_ref().and_then(|d| d.functions),
+        ),
+        (
+            "Branch coverage",
+            coverage.map(|c| &c.branches),
+            baseline.map(|b| &b.branches),
+            diff.as_ref().and_then(|d| d.branches),
+        ),
     ] {
         lines.push(if has_baseline {
-            format!("| {label} | {} | {} | {} |", pct(current), pct(before), delta(delta_metric))
+            format!(
+                "| {label} | {} | {} | {} |",
+                pct(current),
+                pct(before),
+                delta(delta_metric)
+            )
         } else {
             format!("| {label} | {} |", pct(current))
         });
@@ -168,11 +199,17 @@ fn markdown(
 
     if has_baseline {
         lines.push("".into());
-        lines.push("_Coverage change is in percentage points (pp); file scopes must be comparable._".into());
+        lines.push(
+            "_Coverage change is in percentage points (pp); file scopes must be comparable._"
+                .into(),
+        );
     }
     if !diagnostics.is_empty() {
         let mut seen = HashSet::new();
-        let unique: Vec<_> = diagnostics.iter().filter(|x| seen.insert(x.as_str())).collect();
+        let unique: Vec<_> = diagnostics
+            .iter()
+            .filter(|x| seen.insert(x.as_str()))
+            .collect();
         lines.push("".into());
         lines.push("**Missing or invalid inputs**".into());
         for diag in unique {
@@ -180,7 +217,8 @@ fn markdown(
         }
     }
     lines.push("".into());
-    lines.push("_Informational only. Unavailable metrics are not treated as 0% or passing._".into());
+    lines
+        .push("_Informational only. Unavailable metrics are not treated as 0% or passing._".into());
     lines.push("".into());
     lines.join("\n")
 }
@@ -188,18 +226,40 @@ fn markdown(
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args = parse_args().map_err(|_| USAGE)?;
     let mut diagnostics = Vec::new();
-    let coverage = optional(&args, "coverage", parse_lcov, "Coverage artifact missing or invalid", &mut diagnostics);
-    let baseline = optional(&args, "baseline-coverage", parse_lcov, "Baseline coverage artifact missing or invalid", &mut diagnostics);
+    let coverage = optional(
+        &args,
+        "coverage",
+        parse_lcov,
+        "Coverage artifact missing or invalid",
+        &mut diagnostics,
+    );
+    let baseline = optional(
+        &args,
+        "baseline-coverage",
+        parse_lcov,
+        "Baseline coverage artifact missing or invalid",
+        &mut diagnostics,
+    );
     let coverage_change = compare_coverage(coverage.as_ref(), baseline.as_ref());
     let tests = optional(
         &args,
         "tests",
-        if args.get("tests-format").is_some_and(|s| s == "jest") { parse_jest } else { parse_junit },
+        if args.get("tests-format").is_some_and(|s| s == "jest") {
+            parse_jest
+        } else {
+            parse_junit
+        },
         "Test artifact missing or invalid",
         &mut diagnostics,
     );
     let ci = normalized_ci(args.get("ci").map_or("unknown", String::as_str));
-    let report = markdown(ci, coverage.as_ref(), baseline.as_ref(), tests.as_ref(), &diagnostics);
+    let report = markdown(
+        ci,
+        coverage.as_ref(),
+        baseline.as_ref(),
+        tests.as_ref(),
+        &diagnostics,
+    );
     if let Some(path) = args.get("output") {
         fs::write(Path::new(path), &report)?;
     } else {
@@ -251,7 +311,13 @@ mod tests {
     #[test]
     fn baseline_without_current_remains_unavailable() {
         let baseline = parse_lcov("LH:1\nLF:2\nend_of_record").unwrap();
-        let text = markdown("failure", None, Some(&baseline), None, &["Coverage artifact missing or invalid".into()]);
+        let text = markdown(
+            "failure",
+            None,
+            Some(&baseline),
+            None,
+            &["Coverage artifact missing or invalid".into()],
+        );
         assert!(text.contains("| Line coverage | Not reported | 50.00% | Not reported |"));
         assert!(text.contains("❌ Failed"));
     }

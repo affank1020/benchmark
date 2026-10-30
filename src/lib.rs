@@ -58,7 +58,6 @@ fn parse_count(text: &str) -> Result<u64, LcovError> {
     Ok(value)
 }
 
-
 /// Node's Number(value) followed by a safe non-negative integer check. Unlike
 /// LCOV summary fields, JUnit/Jest counters accept e.g. "+1" and "1e2".
 pub(crate) fn parse_js_count(input: &str) -> Result<u64, LcovError> {

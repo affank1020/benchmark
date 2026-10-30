@@ -31,7 +31,11 @@ fn required(object: &serde_json::Map<String, Value>, key: &str) -> Result<u64, L
 }
 
 fn optional(object: &serde_json::Map<String, Value>, key: &str) -> Result<Option<u64>, LcovError> {
-    object.get(key).filter(|v| !v.is_null()).map(numeric).transpose()
+    object
+        .get(key)
+        .filter(|v| !v.is_null())
+        .map(numeric)
+        .transpose()
 }
 
 pub fn parse_jest(input: &str) -> Result<TestSummary, LcovError> {
@@ -69,22 +73,40 @@ mod tests {
     fn accepts_standard_jest_counts_and_todos() {
         assert_eq!(
             parse_jest(r#"{"numTotalTests":8,"numFailedTests":1,"numPendingTests":2}"#).unwrap(),
-            TestSummary { total: 8, passed: 5, failed: 1, skipped: 2 }
+            TestSummary {
+                total: 8,
+                passed: 5,
+                failed: 1,
+                skipped: 2
+            }
         );
         assert_eq!(
             parse_jest(r#"{"numTotalTests":2,"numPassedTests":1,"numTodoTests":1}"#).unwrap(),
-            TestSummary { total: 2, passed: 1, failed: 0, skipped: 1 }
+            TestSummary {
+                total: 2,
+                passed: 1,
+                failed: 0,
+                skipped: 1
+            }
         );
     }
 
     #[test]
     fn preserves_node_number_conversion_for_json_counters() {
         assert_eq!(
-            parse_jest(r#"{"numTotalTests":"+2","numPassedTests":"1","numTodoTests":"1"}"#).unwrap(),
-            TestSummary { total: 2, passed: 1, failed: 0, skipped: 1 }
+            parse_jest(r#"{"numTotalTests":"+2","numPassedTests":"1","numTodoTests":"1"}"#)
+                .unwrap(),
+            TestSummary {
+                total: 2,
+                passed: 1,
+                failed: 0,
+                skipped: 1
+            }
         );
         assert_eq!(
-            parse_jest(r#"{"numTotalTests":true,"numPassedTests":true}"#).unwrap().total,
+            parse_jest(r#"{"numTotalTests":true,"numPassedTests":true}"#)
+                .unwrap()
+                .total,
             1
         );
     }

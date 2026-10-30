@@ -360,9 +360,18 @@ mod tests {
 
     #[test]
     fn accepts_node_compatible_junit_numeric_attributes() {
-        summary("<testsuite tests=\"+1\" failures=\"+0\"><testcase/></testsuite>", (1, 1, 0, 0));
-        summary("<testsuite tests=\"1e2\" failures=\"0\" errors=\"0\" skipped=\"100\"/>", (100, 0, 0, 100));
-        summary("<testsuite tests=\"0x2\" failures=\"0\" errors=\"0\" skipped=\"2\"/>", (2, 0, 0, 2));
+        summary(
+            "<testsuite tests=\"+1\" failures=\"+0\"><testcase/></testsuite>",
+            (1, 1, 0, 0),
+        );
+        summary(
+            "<testsuite tests=\"1e2\" failures=\"0\" errors=\"0\" skipped=\"100\"/>",
+            (100, 0, 0, 100),
+        );
+        summary(
+            "<testsuite tests=\"0x2\" failures=\"0\" errors=\"0\" skipped=\"2\"/>",
+            (2, 0, 0, 2),
+        );
     }
 
     #[test]
