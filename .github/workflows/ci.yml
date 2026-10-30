@@ -69,3 +69,15 @@ jobs:
         run: |
           cargo +1.85.1 build --locked --bin benchmark
           node test/rust-cli-parity.mjs
+      - name: Release-build and smoke-test the pinned publisher invocation
+        run: |
+          cargo +1.85.1 build --locked --release --manifest-path Cargo.toml --bin benchmark
+          target/release/benchmark \
+            --coverage fixtures/absent.info \
+            --tests test/fixtures/node22-junit.xml \
+            --ci failure --output rust-release-smoke.md
+          node --experimental-strip-types src/cli.mjs \
+            --coverage fixtures/absent.info \
+            --tests test/fixtures/node22-junit.xml \
+            --ci failure --output node-release-smoke.md
+          cmp rust-release-smoke.md node-release-smoke.md

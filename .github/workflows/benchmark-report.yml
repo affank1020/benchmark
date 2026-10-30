@@ -114,6 +114,23 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
+      # Keep the reviewed GitHub API policy checkout above unchanged.
+      # Compile the reporter only from an independently reviewed, immutable
+      # Benchmark source commit; NEVER check out the consumer PR head.
+      - name: Checkout pinned Rust reporter source
+        if: steps.pr.outputs.number != ''
+        uses: actions/checkout@v4
+        with:
+          repository: affank1020/benchmark
+          ref: ed03341fd34abf651a859a8dc8780ca596484856 # Reviewed Rust CLI (#20), merged main
+          path: benchmark-rust
+          persist-credentials: false
+      - name: Install pinned Rust toolchain for reporting
+        if: steps.pr.outputs.number != ''
+        run: rustup toolchain install 1.85.1 --profile minimal
+      - name: Build pinned Rust reporter
+        if: steps.pr.outputs.number != ''
+        run: cargo +1.85.1 build --locked --release --manifest-path benchmark-rust/Cargo.toml --bin benchmark
       - name: Resolve bounded CI artifacts by exact name
         if: steps.pr.outputs.number != ''
         id: artifact
@@ -272,12 +289,12 @@ jobs:
         env:
           CI_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
         run: |
-          node --version
+          # Report generation is Rust-only; Node remains for trusted API policy.
           baseline_args=()
           if [ -f baseline/lcov.info ]; then
             baseline_args=(--baseline-coverage baseline/lcov.info)
           fi
-          node --experimental-strip-types benchmark/src/cli.mjs \
+          benchmark-rust/target/release/benchmark \
             --coverage artifacts/coverage/lcov.info \
             --tests artifacts/tests/junit.xml \
             --ci "$CI_CONCLUSION" \
