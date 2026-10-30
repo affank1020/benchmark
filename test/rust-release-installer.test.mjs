@@ -80,6 +80,9 @@ test("offline Rust consumer installs only fully verified native assets and prese
     assert.equal(receipt.version, version);
     assert.equal(receipt.commit, commit);
     assert.equal(receipt.binarySha256, sha256(binary));
+    assert.equal(receipt.source, "Caller-supplied offline assets; origin not authenticated");
+    assert.doesNotMatch(receipt.source, /official GitHub Release/i,
+      "A self-consistent synthetic archive does not prove GitHub origin");
     const output = await readFile(join(destination, "benchmark"));
     assert.ok(output.equals(binary));
     const info = await lstat(join(destination, "benchmark"));

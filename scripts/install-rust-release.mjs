@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Offline, fail-closed installation of one exact reviewed Rust GitHub Release.
-// Never downloads from an untrusted URL or executes the installed executable.
+// Offline, fail-closed installation of caller-supplied Rust release-format assets.
+// Checksums do not authenticate origin. Never downloads or executes the binary.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
@@ -107,7 +107,7 @@ export async function installVerifiedRustRelease({ assetsDir, destination, versi
     await chmod(binaryPath, 0o755);
     const receipt = {
       version, commit, target, binarySha256: sha256(binary),
-      source: "Official GitHub Release (bytes supplied and verified offline)"
+      source: "Caller-supplied offline assets; origin not authenticated"
     };
     await writeFile(join(out, "installation.json"), JSON.stringify(receipt, null, 2) + "\n",
       { flag: "wx", mode: 0o600 });
