@@ -19,7 +19,7 @@ async function main() {
   const out = resolve(args[1]);
   const commit = args[3];
   const target = process.platform + "-" + process.arch;
-  if (!["linux-x64", "darwin-x64", "darwin-arm64"].includes(target)) {
+  if (!["linux-x64", "linux-arm64", "darwin-x64", "darwin-arm64"].includes(target)) {
     throw new Error("Unsupported candidate platform");
   }
   const stem = "benchmark-rust-" + commit + "-" + target;
